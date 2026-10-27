@@ -11,7 +11,7 @@ from __future__ import annotations
 import os
 import subprocess
 from dataclasses import dataclass, field
-from typing import List, Optional, Tuple
+from typing import List, Optional, Set, Tuple
 
 # .git dizininde varligi yarim kalmis bir islemi gosteren yollar.
 SURMEKTE_YOLLARI = (
@@ -70,6 +70,10 @@ class Baglam:
     cakisan: List[str] = field(default_factory=list)
     surmekte: List[str] = field(default_factory=list)
     sahnelenen: List[str] = field(default_factory=list)
+    # Diskte degismis ama sahnelenmemis dosyalar. Senaryo 11 bunlari sayar.
+    kaydedilmemis: List[str] = field(default_factory=list)
+    # (sha, commit konusu, reflog'da bundan sonra gelen islem)
+    kayip: List[Tuple[str, str, str]] = field(default_factory=list)
     remote_var: bool = False
     remoteler: List[str] = field(default_factory=list)
     # Sahnelenmis yollardan .gitignore kurallarina takilanlar. Dolu olmasi
@@ -93,6 +97,8 @@ def _durum_ayristir(ctx: Baglam, cikti: str) -> None:
       # branch.upstream <ad>          -- upstream yoksa bu satir hic yok
       # branch.ab +<ileri> -<geri>    -- upstream yoksa bu satir hic yok
       u <xy> ... <yol>                -- cakisan dosya
+      1/2 <xy> ... <yol>              -- degismis dosya; xy[1] != '.' ise
+                                         degisiklik sahnelenmemis
     """
     for satir in cikti.splitlines():
         if satir.startswith("# branch.oid "):
@@ -118,6 +124,12 @@ def _durum_ayristir(ctx: Baglam, cikti: str) -> None:
             alan = satir.split(" ", 10)
             if len(alan) == 11:
                 ctx.cakisan.append(alan[10])
+        elif satir.startswith("1 ") or satir.startswith("2 "):
+            # 1 <xy> <sub> <mH> <mI> <mW> <hH> <hI> <yol>
+            alan = satir.split(" ", 8)
+            if len(alan) == 9 and len(alan[1]) == 2 and alan[1][1] != ".":
+                # 2 (kopyalanmis/tasinmis) satirinda yol "yeni\teski" bicimli
+                ctx.kaydedilmemis.append(alan[8].split("\t")[0])
 
 
 def topla(depo: str = ".") -> Baglam:
@@ -153,6 +165,8 @@ def topla(depo: str = ".") -> Baglam:
 
     eposta, _, rc = _git(depo, "config", "user.email")
     ctx.user_email = eposta.strip() if rc == 0 and eposta.strip() else None
+
+    ctx.kayip = kayip_commitler(depo)
 
     return ctx
 
@@ -195,8 +209,60 @@ def ignore_edilenler(depo: str, yollar: List[str]) -> List[str]:
 
 
 def reflog(depo: str, adet: int = 30) -> List[str]:
-    """Senaryo 12 icin reflog satirlari. Salt-okunur."""
-    cikti, _, rc = _git(depo, "reflog", "--date=relative", f"-{adet}")
+    """Okunabilir reflog satirlari. Salt-okunur."""
+    cikti, _, rc = _git(depo, "reflog", "--date=relative", "-%d" % adet)
     if rc != 0:
         return []
     return [s for s in cikti.splitlines() if s.strip()]
+
+
+def erisilemezler(depo: str, shalar: List[str]) -> Set[str]:
+    """Verilen commit'lerden hicbir ref'ten erisilemeyenleri dondurur.
+
+    `rev-list --no-walk <shalar> --not --all`: --no-walk atalara inmez,
+    `--not --all` ref'lerden erisilen her seyi disarida birakir. Geriye
+    yalnizca hicbir branch/tag/HEAD'den ulasilamayan commit'ler kalir.
+    Tek cagri, siniri yok. Salt-okunur.
+    """
+    if not shalar:
+        return set()
+    cikti, _, rc = _git(depo, "rev-list", "--no-walk", *(list(shalar) + ["--not", "--all"]))
+    if rc != 0:
+        return set()
+    return {s.strip() for s in cikti.splitlines() if s.strip()}
+
+
+def kayip_commitler(depo: str, adet: int = 10) -> List[Tuple[str, str, str]]:
+    """Reflog'un son `adet` girdisinde olup hicbir ref'ten erisilemeyenler.
+
+    Iki sinir bilerek konuldu:
+
+    1. Yalnizca son 10 girdi. Reflog yuzlerce girdi tutuyor ve aylar once
+       dusmus bir commit'i bugun "kaybettin" diye bildirmek gurultu olur.
+       `gitwhy doctor` tam reflog'u gostermek icin var.
+    2. Bir ustteki (daha yeni) islem `commit (amend)` ise atlanir: amend
+       eski commit'i erisilemez birakir ama bu kasitli bir islemdir, kayip
+       degil. Fixture ile dogrulandi (neg_amend).
+    """
+    cikti, _, rc = _git(depo, "reflog", "--format=%H%x09%gs%x09%s", "-%d" % adet)
+    if rc != 0:
+        return []
+    girdiler: List[Tuple[str, str, str]] = []
+    for satir in cikti.splitlines():
+        alan = satir.split("\t")
+        if len(alan) >= 3 and alan[0].strip():
+            girdiler.append((alan[0].strip(), alan[1], alan[2]))
+
+    adaylar: List[Tuple[str, str, str]] = []
+    gorulen = set()
+    for i, (sha, _gs, konu) in enumerate(girdiler):
+        if i > 0 and girdiler[i - 1][1].startswith("commit (amend)"):
+            continue
+        if sha in gorulen:
+            continue
+        gorulen.add(sha)
+        sonraki = girdiler[i - 1][1] if i > 0 else "(en son islem)"
+        adaylar.append((sha, konu, sonraki))
+
+    kayip_set = erisilemezler(depo, [a[0] for a in adaylar])
+    return [a for a in adaylar if a[0] in kayip_set]

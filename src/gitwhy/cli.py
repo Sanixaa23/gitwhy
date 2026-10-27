@@ -116,6 +116,9 @@ def komut_doctor(arg) -> int:
     satir.append("remote            : %s" % (", ".join(ctx.remoteler) or "yok"))
     satir.append("surmekte islem    : %s" % (", ".join(ctx.surmekte) or "yok"))
     satir.append("cakisan dosya     : %d" % len(ctx.cakisan))
+    satir.append("kaydedilmemis     : %d" % len(ctx.kaydedilmemis))
+    satir.append("erisilemez commit : %s" % (
+        ", ".join("%s (%s)" % (s[:8], konu) for s, konu, _ in ctx.kayip) or "yok"))
     satir.append("user.email        : %s" % (ctx.user_email or "TANIMLI DEGIL"))
     gitignore = os.path.exists(os.path.join(ctx.depo, ".gitignore"))
     satir.append(".gitignore        : %s" % ("var" if gitignore else "YOK"))

@@ -63,6 +63,7 @@ def degerler(ctx: Baglam) -> Dict[str, str]:
     """Sablonlarda kullanilabilen yer tutucular."""
     bagimlilik = rules.bagimlilik_yollari(ctx)
     sir = rules.sir_yollari(ctx)
+    kayip = ctx.kayip
     return {
         "depo": ctx.depo,
         "branch": ctx.branch or "(branch yok)",
@@ -77,6 +78,17 @@ def degerler(ctx: Baglam) -> Dict[str, str]:
         "sahnelenen": ", ".join(ctx.sahnelenen) or "(yok)",
         "sahnelenen_sayisi": str(len(ctx.sahnelenen)),
         "surmekte": ", ".join(ctx.surmekte) or "(yok)",
+        "surmekte_komut": _surmekte_komut(ctx),
+        "kaydedilmemis": ", ".join(ctx.kaydedilmemis) or "(yok)",
+        "kaydedilmemis_ilk": ctx.kaydedilmemis[0] if ctx.kaydedilmemis else "<dosya>",
+        "kaydedilmemis_sayisi": str(len(ctx.kaydedilmemis)),
+        "kayip_sayisi": str(len(kayip)),
+        "kayip_listesi": "\n".join(
+            "- `%s` — %s  (reflog: %s)" % (s[:8], konu, sonraki)
+            for s, konu, sonraki in kayip
+        ) or "- (yok)",
+        "kayip_ilk_sha": kayip[0][0][:8] if kayip else "<sha>",
+        "kayip_ilk_konu": kayip[0][1] if kayip else "(bilinmiyor)",
         "remoteler": ", ".join(ctx.remoteler) or "(yok)",
         "ilk_remote": ctx.remoteler[0] if ctx.remoteler else "origin",
         "user_email": ctx.user_email or "(tanimli degil)",
@@ -88,6 +100,23 @@ def degerler(ctx: Baglam) -> Dict[str, str]:
         "sir_sayisi": str(len(sir)),
         "ignore_durumu": _ignore_durumu(ctx, bagimlilik + sir),
     }
+
+
+def _surmekte_komut(ctx: Baglam) -> str:
+    """Yarim kalmis islemin git komut adi: senaryo 4 sablonu bunu kullanir.
+
+    `git cherry-pick --continue` ile `git revert --continue` ayri komutlar;
+    yeni baslayana ikisini birden gostermek yerine dogru olani veriyoruz.
+    """
+    if "REVERT_HEAD" in ctx.surmekte:
+        return "revert"
+    if "CHERRY_PICK_HEAD" in ctx.surmekte:
+        return "cherry-pick"
+    if "rebase-merge" in ctx.surmekte or "rebase-apply" in ctx.surmekte:
+        return "rebase"
+    if "MERGE_HEAD" in ctx.surmekte:
+        return "merge"
+    return "cherry-pick"
 
 
 def _ignore_durumu(ctx: Baglam, yollar) -> str:

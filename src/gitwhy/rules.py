@@ -36,6 +36,10 @@ UYGULANAN = (
     "07_push_reddedildi",
     "09_bagimlilik_sahnelendi",
     "10_sir_sahnelendi",
+    "04_cherry_pick_ortasi",
+    "08_yanlis_branch",
+    "11_yerel_degisiklik_engelliyor",
+    "12_kayip_commit",
 )
 
 # Senaryo 9: sahnelenmemesi gereken dizin adlari. Yol parcasi olarak eslesir,
@@ -61,7 +65,17 @@ SIR_MUAF_SONLARI = (".example", ".sample", ".template", ".dist", ".tpl", ".defau
 # Fixture testinde dogrulandi: git'in ilk cikti satiri gercek hata olmayabilir.
 # Merge cakismasinda ilk satir "Auto-merging a.txt"; CONFLICT asagida.
 # Bu yuzden TUM satirlari tariyoruz, ilkini almiyoruz.
-HATA_ISARETCILERI = ("CONFLICT", "error:", "fatal:", "! [rejected]", "warning:")
+#
+# DIKKAT: bu liste bir KAPI. Hicbir isaretciye uymayan satir hata_satirlari()
+# tarafindan atilir ve esle() o satiri hic gormez. Isaretciler bu yuzden
+# mumkun olan en gevsek parca olmali, senaryo desenleri ise dar.
+# Iki kere yasandi: "! [remote rejected]" (korumali branch reddi) ne
+# "! [rejected]" ne de "[rejected]" isaretcisine uyuyor, cunku arada
+# "remote " var. Bu yuzden isaretci sadece "rejected".
+HATA_ISARETCILERI = (
+    "CONFLICT", "error:", "fatal:", "rejected", "declined",
+    "warning:", "remote:",
+)
 
 
 def hata_satirlari(hata_metni: Optional[str]) -> List[str]:
@@ -141,7 +155,7 @@ def esle(ctx: Baglam, hata_metni: Optional[str] = None) -> Optional[str]:
     if "rebase-merge" in ctx.surmekte or "rebase-apply" in ctx.surmekte:
         return "03_rebase_ortasi"
     if "CHERRY_PICK_HEAD" in ctx.surmekte or "REVERT_HEAD" in ctx.surmekte:
-        return None  # TODO senaryo 04: fixture + sablon yazilacak
+        return "04_cherry_pick_ortasi"
 
     # 2) Cakisma. MERGE_HEAD rebase'de de olur, o yuzden 1. adimdan sonra.
     if ctx.cakisan or "MERGE_HEAD" in ctx.surmekte:
@@ -154,6 +168,17 @@ def esle(ctx: Baglam, hata_metni: Optional[str] = None) -> Optional[str]:
         return "05_remote_yok"
     if _metinde(hata_metni, "has no upstream branch", "no upstream configured"):
         return "06_upstream_yok"
+    # 08 once, 07'den: ikisi de "failed to push some refs" iceriyor.
+    # Ayirt eden, uzak tarafin reddi (`! [remote rejected]`) ile git'in
+    # fast-forward reddi (`! [rejected]`) arasindaki fark.
+    if _metinde(
+        hata_metni,
+        "[remote rejected]",
+        "pre-receive hook declined",
+        "protected branch",
+        "GH006",
+    ):
+        return "08_yanlis_branch"
     # Reddedilen push'ta ctx.geri'ye GUVENILMEZ: git reddedilen push'tan sonra
     # remote-tracking ref'i guncellemiyor, `branch.ab` hala +N -0 gosteriyor.
     # Gercek "geri" sayisi ancak `git fetch` sonrasi ortaya cikiyor ve
@@ -161,7 +186,7 @@ def esle(ctx: Baglam, hata_metni: Optional[str] = None) -> Optional[str]:
     if _metinde(hata_metni, "! [rejected]", "non-fast-forward", "fetch first"):
         return "07_push_reddedildi"
     if _metinde(hata_metni, "would be overwritten"):
-        return None  # TODO senaryo 11
+        return "11_yerel_degisiklik_engelliyor"
 
     # 4) Durumdan okunan, komuttan bagimsiz durumlar.
     #    Sir once: .env'in commit edilmesi geri alinmasi en pahali hata.
@@ -173,6 +198,14 @@ def esle(ctx: Baglam, hata_metni: Optional[str] = None) -> Optional[str]:
         return "09_bagimlilik_sahnelendi"
     if ctx.detached:
         return "01_detached_head"
+    # Kayip commit en sonda: reflog'un son 10 girdisine bakiyor ve her
+    # depoda bir seyler bulabilecek en gurultulu kural. Onunde eslesen
+    # baska bir senaryo varsa o soylenir.
+    if ctx.kayip:
+        return "12_kayip_commit"
 
-    # TODO senaryo 04, 08, 11, 12
+    # Senaryo 8'in durum tabanli hali BILEREK yok. "main'de gonderilmemis
+    # commit var" sinyali, tek basina calisan birinin normal halinden
+    # ayirt edilemiyor (neg_main_ileride fixture'i bunu gosteriyor).
+    # Bu yuzden 8 yalnizca uzak tarafin reddiyle tespit ediliyor.
     return None

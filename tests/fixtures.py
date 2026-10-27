@@ -169,29 +169,180 @@ def _kur_sir_sahnelendi() -> Fixture:
     return Fixture("10_sir_sahnelendi", depo, _birlestir(out, err), rc)
 
 
+def _kur_cherry_pick_ortasi() -> Fixture:
+    depo = _yeni_depo()
+    g(depo, "checkout", "-q", "-b", "ozellik")
+    _yaz(depo, "a.txt", "satir1\nOZELLIK\n")
+    g(depo, "commit", "-qam", "ozellik tarafi")
+    sha, _, _ = g(depo, "rev-parse", "HEAD")
+    g(depo, "checkout", "-q", "main")
+    _yaz(depo, "a.txt", "satir1\nMAIN\n")
+    g(depo, "commit", "-qam", "main tarafi")
+    out, err, rc = g(depo, "cherry-pick", sha.strip())
+    return Fixture("04_cherry_pick_ortasi", depo, _birlestir(out, err), rc)
+
+
+def _kur_revert_ortasi() -> Fixture:
+    depo = _yeni_depo()
+    _yaz(depo, "a.txt", "satir1\nBASKA SATIR\n")
+    g(depo, "commit", "-qam", "ucuncu commit")
+    out, err, rc = g(depo, "revert", "HEAD~1")
+    return Fixture("04_cherry_pick_ortasi", depo, _birlestir(out, err), rc)
+
+
+def _kur_korumali_branch() -> Fixture:
+    """Senaryo 8: main'e dogrudan push, uzak taraf reddediyor.
+
+    Bare depoya pre-receive hook konur; GitHub'daki korumali branch
+    reddinin urettigi mesajin aynisi olusur.
+    """
+    depo = _yeni_depo()
+    bare = _uzak_ekle(depo)
+    g(depo, "push", "-q", "-u", "origin", "main")
+    hook = os.path.join(bare, "hooks", "pre-receive")
+    with open(hook, "w", encoding="utf-8", newline="\n") as f:
+        f.write(
+            "#!/bin/sh\n"
+            'echo "main korumali bir branch; ozellik branch\'i acip PR gonder" >&2\n'
+            "exit 1\n"
+        )
+    os.chmod(hook, 0o755)
+    _yaz(depo, "b.txt", "yeni ozellik\n")
+    g(depo, "add", "b.txt")
+    g(depo, "commit", "-qm", "ozellik dogrudan main'e gitti")
+    out, err, rc = g(depo, "push")
+    return Fixture("08_yanlis_branch", depo, _birlestir(out, err), rc)
+
+
+def _kur_checkout_engellendi() -> Fixture:
+    depo = _yeni_depo()
+    g(depo, "checkout", "-q", "-b", "ozellik")
+    _yaz(depo, "a.txt", "satir1\nOZELLIK\n")
+    g(depo, "commit", "-qam", "ozellik tarafi")
+    g(depo, "checkout", "-q", "main")
+    _yaz(depo, "a.txt", "satir1\nkaydedilmemis is\n")   # commit edilmedi
+    out, err, rc = g(depo, "checkout", "ozellik")
+    return Fixture("11_yerel_degisiklik_engelliyor", depo, _birlestir(out, err), rc)
+
+
+def _kur_merge_engellendi() -> Fixture:
+    depo = _yeni_depo()
+    g(depo, "checkout", "-q", "-b", "ozellik")
+    _yaz(depo, "a.txt", "satir1\nOZELLIK\n")
+    g(depo, "commit", "-qam", "ozellik tarafi")
+    g(depo, "checkout", "-q", "main")
+    _yaz(depo, "a.txt", "satir1\nkaydedilmemis is\n")
+    out, err, rc = g(depo, "merge", "ozellik")
+    return Fixture("11_yerel_degisiklik_engelliyor", depo, _birlestir(out, err), rc)
+
+
+def _kur_kayip_commit_reset() -> Fixture:
+    depo = _yeni_depo()
+    _yaz(depo, "c.txt", "saatlerce ugrasilan is\n")
+    g(depo, "add", "c.txt")
+    g(depo, "commit", "-qm", "saatlerce ugrasilan is")
+    out, err, rc = g(depo, "reset", "--hard", "HEAD~1")
+    return Fixture("12_kayip_commit", depo, _birlestir(out, err), rc)
+
+
+def _kur_kayip_commit_branch_silindi() -> Fixture:
+    depo = _yeni_depo()
+    g(depo, "checkout", "-q", "-b", "ozellik")
+    _yaz(depo, "c.txt", "branch ile birlikte giden is\n")
+    g(depo, "add", "c.txt")
+    g(depo, "commit", "-qm", "branch ile birlikte giden is")
+    g(depo, "checkout", "-q", "main")
+    out, err, rc = g(depo, "branch", "-D", "ozellik")
+    return Fixture("12_kayip_commit", depo, _birlestir(out, err), rc)
+
+
+# --- negatif kontroller: hicbir senaryoya eslesmemeli --------------------
+
+def _kur_temiz() -> Fixture:
+    """Sorunsuz depo. Eslesirse yanlis pozitif var."""
+    depo = _yeni_depo()
+    return Fixture("(eslesme yok)", depo, "", 0)
+
+
+def _kur_amend_sonrasi() -> Fixture:
+    """`git commit --amend` eski commit'i erisilemez birakir ama bu bir kayip
+    degil, kasitli bir islem. Senaryo 12 bunu kayip commit saymamali."""
+    depo = _yeni_depo()
+    _yaz(depo, "a.txt", "satir1\nsatir2\nsatir3\n")
+    out, err, rc = g(depo, "commit", "-qam", "ikinci commit duzeltildi", "--amend")
+    return Fixture("(eslesme yok)", depo, _birlestir(out, err), rc)
+
+
+def _kur_main_ileride() -> Fixture:
+    """main'de 1 commit var, gonderilmemis. Tek basina calisan birinin
+    normal hali: senaryo 8 bunu "yanlis branch" sanmamali."""
+    depo = _yeni_depo()
+    _uzak_ekle(depo)
+    g(depo, "push", "-q", "-u", "origin", "main")
+    _yaz(depo, "d.txt", "normal is\n")
+    g(depo, "add", "d.txt")
+    g(depo, "commit", "-qm", "normal is")
+    return Fixture("(eslesme yok)", depo, "", 0)
+
+
+# Varyant anahtari -> kurucu. Bir senaryonun birden fazla fixture'i olabilir:
+# ayni senaryo kimligini donduren her varyant matriste ayni satira dusuyor.
 KURUCULAR: Dict[str, Callable[[], Fixture]] = {
     "01_detached_head": _kur_detached,
     "02_merge_cakismasi": _kur_merge_cakismasi,
     "03_rebase_ortasi": _kur_rebase_ortasi,
+    "04_cherry_pick": _kur_cherry_pick_ortasi,
+    "04_revert": _kur_revert_ortasi,
     "05_remote_yok": _kur_remote_yok,
     "06_upstream_yok": _kur_upstream_yok,
     "07_push_reddedildi": _kur_push_reddedildi,
+    "08_korumali_branch": _kur_korumali_branch,
     "09_bagimlilik_sahnelendi": _kur_bagimlilik_sahnelendi,
     "10_sir_sahnelendi": _kur_sir_sahnelendi,
+    "11_checkout_engellendi": _kur_checkout_engellendi,
+    "11_merge_engellendi": _kur_merge_engellendi,
+    "12_reset_hard": _kur_kayip_commit_reset,
+    "12_branch_silindi": _kur_kayip_commit_branch_silindi,
+    "neg_temiz": _kur_temiz,
+    "neg_amend": _kur_amend_sonrasi,
+    "neg_main_ileride": _kur_main_ileride,
 }
 
-SENARYOLAR = tuple(KURUCULAR)
+VARYANTLAR = tuple(KURUCULAR)
+
+# Matris satirlari: her senaryo kimligi bir kere, varyant sirasina gore.
+SENARYOLAR = (
+    "01_detached_head",
+    "02_merge_cakismasi",
+    "03_rebase_ortasi",
+    "04_cherry_pick_ortasi",
+    "05_remote_yok",
+    "06_upstream_yok",
+    "07_push_reddedildi",
+    "08_yanlis_branch",
+    "09_bagimlilik_sahnelendi",
+    "10_sir_sahnelendi",
+    "11_yerel_degisiklik_engelliyor",
+    "12_kayip_commit",
+    "(eslesme yok)",
+)
 
 
-def kur(senaryo_id: str) -> Fixture:
-    """Senaryoyu gercek bir depoda kurar."""
-    if senaryo_id not in KURUCULAR:
-        raise KeyError("fixture yok: " + senaryo_id)
-    return KURUCULAR[senaryo_id]()
+def kur(varyant: str) -> Fixture:
+    """Varyanti gercek bir depoda kurar.
+
+    Senaryo kimligi de kabul edilir: o senaryonun ilk varyanti kurulur.
+    """
+    if varyant in KURUCULAR:
+        return KURUCULAR[varyant]()
+    for ad, islev in KURUCULAR.items():
+        if ad.split("_")[0] == varyant.split("_")[0]:
+            return islev()
+    raise KeyError("fixture yok: " + varyant)
 
 
 def hepsi() -> List[Fixture]:
-    return [kur(s) for s in SENARYOLAR]
+    return [KURUCULAR[v]() for v in VARYANTLAR]
 
 
 def temizle() -> None:
