@@ -14,6 +14,7 @@ import os
 import re
 from typing import Dict, Optional
 
+from . import rules
 from .context import Baglam
 
 SABLON_DIZINI = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scenarios")
@@ -34,6 +35,8 @@ YIKICI_KOMUTLAR = (
     "git branch -D",
     "git reflog expire",
     "git gc --prune",
+    "git filter-repo",
+    "git filter-branch",
     "--discard-changes",
 )
 
@@ -58,6 +61,8 @@ _YER_TUTUCU = re.compile(r"\{\{(\w+)\}\}")
 
 def degerler(ctx: Baglam) -> Dict[str, str]:
     """Sablonlarda kullanilabilen yer tutucular."""
+    bagimlilik = rules.bagimlilik_yollari(ctx)
+    sir = rules.sir_yollari(ctx)
     return {
         "depo": ctx.depo,
         "branch": ctx.branch or "(branch yok)",
@@ -73,8 +78,31 @@ def degerler(ctx: Baglam) -> Dict[str, str]:
         "sahnelenen_sayisi": str(len(ctx.sahnelenen)),
         "surmekte": ", ".join(ctx.surmekte) or "(yok)",
         "remoteler": ", ".join(ctx.remoteler) or "(yok)",
+        "ilk_remote": ctx.remoteler[0] if ctx.remoteler else "origin",
         "user_email": ctx.user_email or "(tanimli degil)",
+        "bagimlilik": ", ".join(bagimlilik) or "(yok)",
+        "bagimlilik_ilk": bagimlilik[0] if bagimlilik else "<dizin>",
+        "bagimlilik_sayisi": str(len(bagimlilik)),
+        "sir": ", ".join(sir) or "(yok)",
+        "sir_ilk": sir[0] if sir else "<dosya>",
+        "sir_sayisi": str(len(sir)),
+        "ignore_durumu": _ignore_durumu(ctx, bagimlilik + sir),
     }
+
+
+def _ignore_durumu(ctx: Baglam, yollar) -> str:
+    """.gitignore bu yollari kapsiyor mu; kapsiyorsa bu baska bir sorun."""
+    if not yollar:
+        return "sahnelenmis sorunlu yol yok"
+    kapsanan = [y for y in ctx.ignore_edilen if any(y.startswith(x) for x in yollar)]
+    if kapsanan:
+        return (
+            ".gitignore bu yolu zaten kapsiyor (%s) — dosya buna ragmen "
+            "sahnelenmis. Ya `git add -f` kullanilmis ya da kural dosya "
+            "eklendikten sonra yazilmis; ignore kurali takip edilen bir "
+            "dosyayi takipten cikarmaz." % ", ".join(kapsanan[:3])
+        )
+    return ".gitignore bu yolu kapsamiyor"
 
 
 def sablon_oku(senaryo_id: str) -> str:
@@ -129,7 +157,8 @@ def _eslesme_yok(ctx: Baglam) -> str:
     d = degerler(ctx)
     return (
         "## Eslesen senaryo yok\n\n"
-        "gitwhy su an 12 senaryodan 4'unu tanıyor. Bu durum onlardan biri degil.\n\n"
+        "gitwhy su an %d senaryodan %d'ini taniyor; bu durum onlardan biri degil.\n\n"
+        % (len(rules.SENARYOLAR), len(rules.UYGULANAN)) +
         "## Neredesin\n\n"
         "- Depo: %(depo)s\n"
         "- Branch: %(branch)s\n"

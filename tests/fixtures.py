@@ -116,11 +116,68 @@ def _kur_remote_yok() -> Fixture:
     return Fixture("05_remote_yok", depo, _birlestir(out, err), rc)
 
 
+def _uzak_ekle(depo: str) -> str:
+    """Depoya gercek bir bare remote baglar; bare deponun yolunu dondurur."""
+    ust = os.path.dirname(depo)
+    # -b main sart: bare deponun HEAD'i master kalirsa klon bos cikar ve
+    # 07 fixture'i reddedilen push'u hic uretmez (bir kere yasandi).
+    g(ust, "init", "--bare", "-q", "-b", "main", "uzak.git")
+    bare = os.path.join(ust, "uzak.git")
+    g(depo, "remote", "add", "origin", bare)
+    return bare
+
+
+def _kur_upstream_yok() -> Fixture:
+    depo = _yeni_depo()
+    _uzak_ekle(depo)
+    out, err, rc = g(depo, "push")
+    return Fixture("06_upstream_yok", depo, _birlestir(out, err), rc)
+
+
+def _kur_push_reddedildi() -> Fixture:
+    depo = _yeni_depo()
+    bare = _uzak_ekle(depo)
+    g(depo, "push", "-q", "-u", "origin", "main")
+    # Baskasi ayni branch'e commit atip gonderir.
+    ust = os.path.dirname(depo)
+    g(ust, "clone", "-q", bare, "klon")
+    klon = os.path.join(ust, "klon")
+    _yaz(klon, "a.txt", "baskasinin degisikligi\n")
+    g(klon, "commit", "-qam", "baskasinin commit'i")
+    g(klon, "push", "-q")
+    # Yerel depo haberi olmadan ayni dosyayi degistirir ve gondermeyi dener.
+    _yaz(depo, "a.txt", "benim degisikligim\n")
+    g(depo, "commit", "-qam", "benim commit'im")
+    out, err, rc = g(depo, "push")
+    return Fixture("07_push_reddedildi", depo, _birlestir(out, err), rc)
+
+
+def _kur_bagimlilik_sahnelendi() -> Fixture:
+    depo = _yeni_depo()
+    _yaz(depo, "node_modules/paket/index.js", "module.exports = 1\n")
+    _yaz(depo, "node_modules/paket/package.json", '{"name":"paket"}\n')
+    out, err, rc = g(depo, "add", "-A")
+    # Basarisiz komut yok: kullanici `git status` ciktisini gorup gelir.
+    return Fixture("09_bagimlilik_sahnelendi", depo, _birlestir(out, err), rc)
+
+
+def _kur_sir_sahnelendi() -> Fixture:
+    depo = _yeni_depo()
+    _yaz(depo, ".env", "API_KEY=sahte-test-degeri\n")
+    _yaz(depo, ".env.example", "API_KEY=\n")  # bu commit edilmeli, uyari vermemeli
+    out, err, rc = g(depo, "add", "-A")
+    return Fixture("10_sir_sahnelendi", depo, _birlestir(out, err), rc)
+
+
 KURUCULAR: Dict[str, Callable[[], Fixture]] = {
     "01_detached_head": _kur_detached,
     "02_merge_cakismasi": _kur_merge_cakismasi,
     "03_rebase_ortasi": _kur_rebase_ortasi,
     "05_remote_yok": _kur_remote_yok,
+    "06_upstream_yok": _kur_upstream_yok,
+    "07_push_reddedildi": _kur_push_reddedildi,
+    "09_bagimlilik_sahnelendi": _kur_bagimlilik_sahnelendi,
+    "10_sir_sahnelendi": _kur_sir_sahnelendi,
 }
 
 SENARYOLAR = tuple(KURUCULAR)

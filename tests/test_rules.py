@@ -60,6 +60,60 @@ def test_hata_metni_tum_satirlar_taraniyor():
         fixtures.temizle()
 
 
+def test_env_example_yanlis_pozitif_vermiyor():
+    """`.env.example` commit edilmek uzere var; sir sayilmamali."""
+    try:
+        fx = fixtures.kur("10_sir_sahnelendi")
+        ctx = context.topla(fx.depo)
+        assert ".env" in ctx.sahnelenen and ".env.example" in ctx.sahnelenen
+        assert rules.sir_yollari(ctx) == [".env"]
+    finally:
+        fixtures.temizle()
+
+
+def test_bagimlilik_dosya_degil_dizin_donduruyor():
+    """node_modules icindeki 2 dosya icin tek bir dizin adi donmeli."""
+    try:
+        fx = fixtures.kur("09_bagimlilik_sahnelendi")
+        ctx = context.topla(fx.depo)
+        assert len(ctx.sahnelenen) == 2
+        assert rules.bagimlilik_yollari(ctx) == ["node_modules"]
+    finally:
+        fixtures.temizle()
+
+
+def test_reddedilen_pushta_geri_sayisi_sifir_gorunuyor():
+    """Dogrulanmis bulgu: reddedilen push remote-tracking ref'i guncellemez.
+
+    Bu yuzden senaryo 7 karari `branch.ab` degil hata metni uzerinden verilir.
+    Test, birinin ileride ctx.geri'ye dayanan bir kural yazmasini engeller.
+    """
+    try:
+        fx = fixtures.kur("07_push_reddedildi")
+        ctx = context.topla(fx.depo)
+        assert "! [rejected]" in fx.hata_metni
+        assert ctx.geri == 0, "git davranisi degismis, kural yeniden gozden gecirilmeli"
+        assert rules.esle(ctx, fx.hata_metni) == "07_push_reddedildi"
+        # Hata metni olmadan bu durum tespit EDILEMEZ; bilerek boyle.
+        assert rules.esle(ctx, "") != "07_push_reddedildi"
+    finally:
+        fixtures.temizle()
+
+
+def test_sahnelenmis_sir_ignore_kontrolu_no_index_kullaniyor():
+    """check-ignore --no-index olmadan sahnelenmis yol hep "ignore edilmiyor" cikar."""
+    try:
+        fx = fixtures.kur("10_sir_sahnelendi")
+        with open(os.path.join(fx.depo, ".gitignore"), "w", encoding="utf-8") as f:
+            f.write(".env\n")
+        ctx = context.topla(fx.depo)
+        assert ".env" in ctx.ignore_edilen, (
+            "sahnelenmis .env icin kural eslesmesi gorulemedi; --no-index dusmus olabilir"
+        )
+    finally:
+        fixtures.temizle()
+
+
 def test_uygulanan_senaryolarin_sablonu_var():
     eksik = [s for s in rules.UYGULANAN if s not in explain.sablonlar()]
     assert not eksik, "sablonu olmayan senaryo: %s" % eksik

@@ -23,25 +23,27 @@ SURMEKTE_YOLLARI = (
 )
 
 
-def _git(depo: str, *arg: str) -> Tuple[str, str, int]:
-    """git'i `depo` icinde kosar; (stdout, stderr, exit) dondurur.
-
-    LC_ALL=C: kendi sorgularimizin cikti dili sabit kalsin. Kullanicinin
+def _ortam() -> dict:
+    """LC_ALL=C: kendi sorgularimizin cikti dili sabit kalsin. Kullanicinin
     gordugu hata mesaji bundan etkilenmez, onu biz uretmiyoruz.
     GIT_OPTIONAL_LOCKS=0: index'e yazma ihtimalini de kaldirir.
     """
-    ortam = dict(
+    return dict(
         os.environ,
         LC_ALL="C",
         GIT_OPTIONAL_LOCKS="0",
         GIT_PAGER="cat",
         GIT_TERMINAL_PROMPT="0",
     )
+
+
+def _git(depo: str, *arg: str) -> Tuple[str, str, int]:
+    """git'i `depo` icinde kosar; (stdout, stderr, exit) dondurur."""
     try:
         p = subprocess.run(
             ["git", "-C", depo, *arg],
             capture_output=True,
-            env=ortam,
+            env=_ortam(),
         )
     except FileNotFoundError:
         return "", "git bulunamadi", 127
@@ -70,6 +72,10 @@ class Baglam:
     sahnelenen: List[str] = field(default_factory=list)
     remote_var: bool = False
     remoteler: List[str] = field(default_factory=list)
+    # Sahnelenmis yollardan .gitignore kurallarina takilanlar. Dolu olmasi
+    # "kural var ama dosya yine de sahnelenmis" demektir (git add -f, veya
+    # kural dosya eklendikten sonra yazilmis).
+    ignore_edilen: List[str] = field(default_factory=list)
     son_mesaj: Optional[str] = None
     user_email: Optional[str] = None
 
@@ -134,6 +140,9 @@ def topla(depo: str = ".") -> Baglam:
 
     sahne, _, _ = _git(depo, "diff", "--cached", "--name-only")
     ctx.sahnelenen = [y for y in sahne.splitlines() if y.strip()]
+    # 200 yol siniri: dev bir ilk commit'te binlerce yol olabilir, tek
+    # check-ignore cagrisini sisirmenin bir faydasi yok.
+    ctx.ignore_edilen = ignore_edilenler(depo, ctx.sahnelenen[:200])
 
     remote, _, _ = _git(depo, "remote")
     ctx.remoteler = [r for r in remote.splitlines() if r.strip()]
@@ -151,10 +160,38 @@ def topla(depo: str = ".") -> Baglam:
 def ignore_ediliyor(depo: str, yol: str) -> bool:
     """`git check-ignore` ile tek bir yolun ignore edilip edilmedigini sorar.
 
-    exit 0 = ignore ediliyor, 1 = edilmiyor. Senaryo 9 ve 10 bunu kullanacak.
+    exit 0 = ignore ediliyor, 1 = edilmiyor.
     """
-    _, _, rc = _git(depo, "check-ignore", "-q", yol)
+    _, _, rc = _git(depo, "check-ignore", "-q", "--no-index", yol)
     return rc == 0
+
+
+def ignore_edilenler(depo: str, yollar: List[str]) -> List[str]:
+    """Verilen yollardan .gitignore kurallarina takilanlari dondurur.
+
+    --no-index SART: check-ignore varsayilan olarak index'e bakar ve
+    index'te olan (yani sahnelenmis) bir yolu, kural eslesse bile "ignore
+    edilmiyor" sayar. Senaryo 9 ve 10 tam olarak sahnelenmis yollari
+    sorguluyor, o yuzden bu bayrak olmadan sonuc her zaman bos cikar.
+
+    Tek cagri, --stdin ile. Salt-okunur.
+    """
+    yollar = [y for y in yollar if y.strip()]
+    if not yollar:
+        return []
+    try:
+        p = subprocess.run(
+            ["git", "-C", depo, "check-ignore", "--no-index", "--stdin"],
+            input="\n".join(yollar).encode("utf-8"),
+            capture_output=True,
+            env=_ortam(),
+        )
+    except FileNotFoundError:
+        return []
+    if p.returncode not in (0, 1):   # 128 = hata; sessizce bos don
+        return []
+    cikti = p.stdout.decode("utf-8", "replace")
+    return [y for y in cikti.splitlines() if y.strip()]
 
 
 def reflog(depo: str, adet: int = 30) -> List[str]:

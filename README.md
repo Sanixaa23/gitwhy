@@ -6,7 +6,7 @@ bir rebase var mı — ve o duruma özel düzeltme komutunu üretir. Eşleştirm
 LLM değil; ağ olmadan da çalışır. Yıkıcı komutları asla kendiliğinden çalıştırmaz, sadece
 ne sileceğini yazarak gösterir. Senaryo eşleşme doğruluğu aşağıdaki tabloda ölçülmüştür.
 
-> **Durum: iskelet.** 12 senaryonun 4'ü çalışıyor. Kalanlar `src/gitwhy/rules.py` içinde
+> **Durum: iskelet.** 12 senaryonun 8'i çalışıyor. Kalanlar `src/gitwhy/rules.py` içinde
 > `TODO` olarak işaretli.
 
 ## Kurulum
@@ -40,11 +40,11 @@ gitwhy shell-init bash           # git başarısız olunca otomatik devreye gire
 | 3 | Rebase ortasında kalmış | ✅ | `.git/rebase-merge` veya `rebase-apply` |
 | 4 | Cherry-pick / revert ortasında | ⬜ | `CHERRY_PICK_HEAD` / `REVERT_HEAD` |
 | 5 | Remote hiç yok | ✅ | `fatal: No configured push destination.` |
-| 6 | Remote var, upstream yok | ⬜ | `has no upstream branch` |
-| 7 | Push reddedildi (geride kalmış) | ⬜ | `! [rejected]` + `branch.ab -N` |
+| 6 | Remote var, upstream yok | ✅ | `has no upstream branch` |
+| 7 | Push reddedildi (geride kalmış) | ✅ | `! [rejected]` / `fetch first` (**`branch.ab` değil**) |
 | 8 | Yanlış branch'e commit | ⬜ | son commit `main`'de ve uzakta yok |
-| 9 | `node_modules` sahnelenmiş | ⬜ | staged yol eşleşmesi + `check-ignore` exit 1 |
-| 10 | `.env` / anahtar sahnelenmiş | ⬜ | staged dosya adı `.env`, `*.pem`, `id_rsa` |
+| 9 | `node_modules` sahnelenmiş | ✅ | staged yol parçası bağımlılık dizini |
+| 10 | `.env` / anahtar sahnelenmiş | ✅ | staged dosya adı `.env`, `*.pem`, `id_rsa` |
 | 11 | Yerel değişiklik checkout'u engelliyor | ⬜ | `would be overwritten` |
 | 12 | Kaybolmuş commit | ⬜ | reflog'da HEAD'den erişilemeyen commit |
 
@@ -57,13 +57,17 @@ sokar; kural motoru o depoyu okuyarak tahmin eder. Matris `python tests/test_rul
 çıktısıdır.
 
 ```
-gercek \ tahmin     01    02    03    05   yok
-01                   1     0     0     0     0
-02                   0     1     0     0     0
-03                   0     0     1     0     0
-05                   0     0     0     1     0
+gercek \ tahmin     01    02    03    05    06    07    09    10   yok
+01                   1     0     0     0     0     0     0     0     0
+02                   0     1     0     0     0     0     0     0     0
+03                   0     0     1     0     0     0     0     0     0
+05                   0     0     0     1     0     0     0     0     0
+06                   0     0     0     0     1     0     0     0     0
+07                   0     0     0     0     0     1     0     0     0
+09                   0     0     0     0     0     0     1     0     0
+10                   0     0     0     0     0     0     0     1     0
 
-4/4 dogru eslesme (%100)
+8/8 dogru eslesme (%100)
 ```
 
 Her PR'da GitHub Actions bu matrisi yeniden ölçer.
@@ -113,6 +117,18 @@ Doğru sıra: sürmekte olan işlem → çakışma → hata metni → detached.
 **3. "Upstream yok" tek hata değil, iki ayrı durum.** Remote hiç tanımlı değilse git
 `fatal: No configured push destination.` verir (senaryo 5); remote var ama branch'in
 upstream'i yoksa farklı mesaj ve farklı çözüm (senaryo 6, `git push -u origin <branch>`).
+
+**4. Reddedilen push'tan sonra "geride kaldın" sinyali YOK.** Git reddedilen bir push'tan
+sonra uzak takip referansını güncellemiyor: `branch.ab` hâlâ `+1 -0` gösteriyor. Gerçek
+geri sayısı ancak `git fetch` sonrası `-1` oluyor ve `context.py` fetch yapamaz (salt-okunur).
+Bu yüzden senaryo 7 tek istisnadır: kararı durumdan değil hata metninden verir.
+`test_reddedilen_pushta_geri_sayisi_sifir_gorunuyor` bunu kayıt altında tutuyor.
+
+**5. `git check-ignore` sahnelenmiş yolda `--no-index` olmadan işe yaramaz.** Varsayılan
+olarak check-ignore index'e bakar ve index'te olan bir yolu, kural eşleşse bile "ignore
+edilmiyor" sayar. Senaryo 9 ve 10 tam olarak sahnelenmiş yolları sorguluyor; bu bayrak
+olmadan sonuç her zaman boş çıkar ve "`.gitignore` kuralı var ama dosya yine de
+sahnelenmiş" durumu hiç görülmez.
 
 ## Lisans
 
