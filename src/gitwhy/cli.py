@@ -19,29 +19,46 @@ import sys
 
 from . import __version__, capture, context, explain, rules
 
+# Sarmalayici iki kabukta da ayni isi yapiyor; tek fark boru hattinin
+# cikis kodunu okuma bicimi: bash'te ${PIPESTATUS[0]}, zsh'te
+# ${pipestatus[1]} (zsh dizileri 1'den basliyor).
+_SARMALAYICI_GOVDE = """# gitwhy sarmalayicisi - {dosya} icine ekle
+# Kaldirmak icin: unset -f git
+#
+# Varsayilan: git'in ciktisina dokunulmaz, yalnizca komut ve cikis kodu
+# kaydedilir. Bu haliyle 12 senaryodan 10'u bulunabiliyor.
+# GITWHY_TEE=1: stderr ayrica bir dosyaya kopyalanir, boylece push reddi
+# (senaryo 7 ve 8) de bulunur. Bedeli: stderr artik terminale dogrudan
+# bagli olmadigi icin git ilerleme cubuklarini ("Writing objects: ...")
+# yazdirmaz. Istersen ac, varsayilan kapali.
+git() {{
+  command -v gitwhy >/dev/null 2>&1 || {{ command git "$@"; return $?; }}
+  local kod
+  if [ "${{GITWHY_TEE:-0}}" = "1" ]; then
+    local gw_hata="${{TMPDIR:-/tmp}}/gitwhy-stderr.$$"
+    {{ command git "$@" 2>&1 1>&3 | tee "$gw_hata" >&2; }} 3>&1
+    kod={pipestatus}
+    command gitwhy capture-exit "$kod" "git $*" \\
+        --stderr-dosyasi "$gw_hata" >/dev/null 2>&1
+    rm -f "$gw_hata"
+  else
+    command git "$@"
+    kod=$?
+    command gitwhy capture-exit "$kod" "git $*" >/dev/null 2>&1
+  fi
+  # 130 = Ctrl-C. Kullanici kendisi kesti, aciklanacak bir hata yok.
+  if [ "$kod" -ne 0 ] && [ "$kod" -ne 130 ]; then
+    command gitwhy
+  fi
+  return $kod
+}}
+"""
+
 SARMALAYICI = {
-    "bash": """# gitwhy sarmalayicisi - ~/.bashrc'ye ekle
-git() {
-  command git "$@"
-  local kod=$?
-  if [ $kod -ne 0 ]; then
-    command gitwhy capture-exit "$kod" "git $*" >/dev/null 2>&1
-    command gitwhy
-  fi
-  return $kod
-}
-""",
-    "zsh": """# gitwhy sarmalayicisi - ~/.zshrc'ye ekle
-git() {
-  command git "$@"
-  local kod=$?
-  if [ $kod -ne 0 ]; then
-    command gitwhy capture-exit "$kod" "git $*" >/dev/null 2>&1
-    command gitwhy
-  fi
-  return $kod
-}
-""",
+    "bash": _SARMALAYICI_GOVDE.format(
+        dosya="~/.bashrc", pipestatus="${PIPESTATUS[0]}"),
+    "zsh": _SARMALAYICI_GOVDE.format(
+        dosya="~/.zshrc", pipestatus="${pipestatus[1]}"),
 }
 
 
@@ -54,17 +71,20 @@ def _cikti(metin: str) -> None:
         sys.stdout.write(metin.encode(kodlama, "replace").decode(kodlama) + "\n")
 
 
-def _acikla(depo: str, hata_metni: str) -> int:
+def _acikla(depo: str, hata_metni: str, komut: str = None) -> int:
     ctx = context.topla(depo)
-    senaryo = rules.esle(ctx, hata_metni)
+    senaryo = rules.esle(ctx, hata_metni, komut)
     _cikti(explain.anlat(senaryo, ctx))
     return 0 if senaryo else 1
 
 
 def komut_son_hata(arg) -> int:
-    kayit = capture.oku()
     ctx = context.topla(arg.depo)
-    senaryo = rules.esle(ctx, capture.hata_metni(kayit))
+    kayit = capture.oku()
+    # Baska depoya ait ya da bayatlamis kayit kullanilmaz.
+    if not capture.gecerli(kayit, ctx.depo):
+        kayit = None
+    senaryo = rules.esle(ctx, capture.hata_metni(kayit), capture.komut(kayit))
     # Not duyurusu yalnizca gercekten elimizde bir sey yokken: depo durumu
     # tek basina bir senaryoya eslestiyse ozur dileyecek bir sey yok.
     if senaryo is None and kayit is None:
@@ -99,13 +119,26 @@ def komut_capture(arg) -> int:
         return 0
     capture.yaz(" ".join(arg.komut), p.returncode, out, err, arg.depo)
     _cikti("")
-    _acikla(arg.depo, err + "\n" + out)
+    _acikla(arg.depo, err + "\n" + out, " ".join(arg.komut))
     return p.returncode
 
 
 def komut_capture_exit(arg) -> int:
-    """Shell sarmalayicisi icin: cikti zaten ekranda, sadece exit kodunu kaydet."""
-    capture.yaz(arg.komut_metni, arg.kod, "", "", arg.depo)
+    """Shell sarmalayicisi icin kayit.
+
+    Varsayilan olarak cikti zaten ekranda kaldigi icin yalnizca komut ve
+    cikis kodu kaydedilir; kurallar metinsiz de 5, 6 ve 11'i bulabiliyor.
+    GITWHY_TEE=1 ile sarmalayici stderr'i bir dosyaya da yazar ve o dosyayi
+    buraya verir; 7 ve 8 ancak o zaman eslesir.
+    """
+    metin = ""
+    if arg.stderr_dosyasi:
+        try:
+            with open(arg.stderr_dosyasi, encoding="utf-8", errors="replace") as f:
+                metin = f.read()
+        except OSError:
+            metin = ""
+    capture.yaz(arg.komut_metni, arg.kod, "", metin, arg.depo)
     return 0
 
 
@@ -172,6 +205,8 @@ def main(argv=None) -> int:
     p = alt.add_parser("capture-exit", help="shell sarmalayicisi icin kayit")
     p.add_argument("kod", type=int)
     p.add_argument("komut_metni")
+    p.add_argument("--stderr-dosyasi", dest="stderr_dosyasi", default=None,
+                   help="GITWHY_TEE=1 modunda sarmalayicinin yazdigi hata dosyasi")
     p.add_argument("--depo", default=".")
     p.set_defaults(islev=komut_capture_exit)
 

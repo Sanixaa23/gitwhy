@@ -5,6 +5,7 @@ tamami bu dosyadan geliyor; buraya subprocess veya dosya okuma eklemeyin.
 """
 from __future__ import annotations
 
+import os
 from typing import List, Optional
 
 from .context import Baglam
@@ -137,7 +138,37 @@ def sir_yollari(ctx: Baglam) -> List[str]:
     return [y for y in ctx.sahnelenen if sir_mi(y)]
 
 
-def esle(ctx: Baglam, hata_metni: Optional[str] = None) -> Optional[str]:
+GIT_GENEL_BAYRAKLAR = ("-C", "-c", "--git-dir", "--work-tree", "--namespace")
+
+
+def git_alt_komut(komut: Optional[str]) -> Optional[str]:
+    """"git -c x=y push -u origin main" -> "push". Bilinmiyorsa None.
+
+    Saf metin islemi; komut CALISTIRILMAZ.
+    """
+    if not komut:
+        return None
+    parca = komut.split()
+    if not parca or os.path.basename(parca[0]).replace(".exe", "") != "git":
+        return None
+    i = 1
+    while i < len(parca):
+        p = parca[i]
+        if p in GIT_GENEL_BAYRAKLAR:
+            i += 2
+            continue
+        if p.startswith("-"):
+            i += 1
+            continue
+        return p
+    return None
+
+
+def esle(
+    ctx: Baglam,
+    hata_metni: Optional[str] = None,
+    komut: Optional[str] = None,
+) -> Optional[str]:
     """Durum ve hata metninden senaryo kimligi uretir; eslesme yoksa None.
 
     SIRALAMA KURALI (fixture testiyle dogrulandi, degistirmeyin):
@@ -187,6 +218,26 @@ def esle(ctx: Baglam, hata_metni: Optional[str] = None) -> Optional[str]:
         return "07_push_reddedildi"
     if _metinde(hata_metni, "would be overwritten"):
         return "11_yerel_degisiklik_engelliyor"
+
+    # 3b) Hata METNI yoksa, basarisiz KOMUT + depo durumu.
+    #
+    # Shell sarmalayicisi hatayi ekranda biraktigi icin metni degil yalnizca
+    # komutu ve cikis kodunu kaydedebiliyor. Bu blok olmadan sarmalayici
+    # uzerinden 5, 6 ve 11 hic eslesmiyordu: kullanici ekranda "fatal: No
+    # configured push destination." goruyor, gitwhy "eslesen senaryo yok"
+    # diyordu. Gercek bir depoda olculdu.
+    #
+    # `komut` yalnizca BASARISIZ bir komut icin verilir (capture.yaz sadece
+    # basarisizlikta cagriliyor), o yuzden burada ayrica cikis kodu sorulmuyor.
+    alt = git_alt_komut(komut)
+    if alt in ("push",):
+        if not ctx.remote_var:
+            return "05_remote_yok"
+        if ctx.upstream is None:
+            return "06_upstream_yok"
+    if alt in ("checkout", "switch", "merge", "pull", "rebase", "restore", "stash"):
+        if ctx.kaydedilmemis:
+            return "11_yerel_degisiklik_engelliyor"
 
     # 4) Durumdan okunan, komuttan bagimsiz durumlar.
     #    Sir once: .env'in commit edilmesi geri alinmasi en pahali hata.

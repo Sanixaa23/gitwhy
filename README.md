@@ -74,6 +74,43 @@ gerekenler:
 Bu görüntü de elle alınmadı: `python tools/doctor_goruntu.py` dört ayrı sorunu olan
 gerçek bir depo kurup `gitwhy doctor` koşuyor ve çıktının kendisini çiziyor.
 
+### Shell sarmalayıcısı (isteğe bağlı)
+
+Kurarsan `gitwhy` yazman gerekmez: git başarısız olduğunda kendiliğinden devreye girer.
+
+```bash
+gitwhy shell-init bash >> ~/.bashrc     # zsh için: gitwhy shell-init zsh >> ~/.zshrc
+```
+
+Kaldırmak için satırı sil, ya da o oturumda `unset -f git`.
+
+Sarmalayıcı git'in çıktısına dokunmaz; yalnızca komutu ve çıkış kodunu kaydeder. Hatanın
+**metni** kaydedilmediği için kararı deponun durumu ve çalıştırdığın komut verir — bu
+haliyle 12 senaryodan 10'u bulunur. Bulunamayan ikisi, uzak tarafın cevabına bağlı
+olanlar: push reddi (7) ve korumalı branch (8).
+
+İkisini de istiyorsan stderr kopyalamayı aç:
+
+```bash
+export GITWHY_TEE=1
+```
+
+**Bedeli var:** stderr artık doğrudan terminale bağlı olmadığı için git ilerleme
+çubuklarını (`Writing objects: ...`) yazdırmaz — git ilerlemeyi yalnızca stderr bir
+terminale bağlıyken gösteriyor. Bu yüzden varsayılan kapalı.
+
+Sarmalayıcının kendisi `Ctrl-C` ile kesilen komutlarda (çıkış kodu 130) devreye girmez
+ve `gitwhy` PATH'te yoksa sessizce çekilir, git'i bozmaz.
+
+Sarmalayıcı birim testlerle kapsanamıyor, çünkü orada kabuk yok.
+[tools/sarmalayici_test.sh](tools/sarmalayici_test.sh) onu gerçekten kurup gerçek git
+hatalarıyla deniyor; CI bunu bash ve zsh ile, iki modda da koşuyor:
+
+```bash
+bash tools/sarmalayici_test.sh
+GITWHY_TEE=1 bash tools/sarmalayici_test.sh
+```
+
 ## Senaryolar
 
 | # | Senaryo | Durum | Tespit sinyali |
@@ -205,6 +242,17 @@ sınır koymadan aynı cevabı verir: listelenen commit'lerden hiçbir ref'ten
 erişilemeyenler. `commit --amend` de eski commit'i erişilemez bırakır, ama bu kasıtlı
 bir işlemdir — reflog'da bir üstteki girdi `commit (amend)` ise atlanıyor
 (`neg_amend` fixture'ı bunu doğruluyor).
+
+**8. Shell sarmalayıcısı hata metnini kaydedemiyor, çünkü metin zaten ekranda.**
+İlk sürüm yalnızca çıkış kodunu kaydediyordu; sonuç, metinden karar verilen beş
+senaryonun (5, 6, 7, 8, 11) sarmalayıcı üzerinden **hiç** eşleşmemesiydi. Kullanıcı
+ekranda `fatal: No configured push destination.` görüyor, gitwhy "eşleşen senaryo yok"
+diyordu. Çözüm stderr'i boruya almak değil — o git'in ilerleme çubuklarını susturur —
+**başarısız komutu kurala girdi vermek** oldu: `git push` + remote yok → senaryo 5,
+`git push` + remote var ama upstream yok → senaryo 6, `git checkout` + kaydedilmemiş
+dosya → senaryo 11. Takas yok, kapsam 7/12'den 10/12'ye çıktı. Komut kaydı yalnızca aynı
+depodan ve son 10 dakikadan kabul ediliyor; bayat bir kayıt bugünkü komutun cevabı
+sanılmasın diye.
 
 ## Demo kaydını yeniden üretmek
 

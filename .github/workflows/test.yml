@@ -24,3 +24,24 @@ jobs:
         run: python -m pytest -q
       - name: karisiklik matrisi
         run: python tests/test_rules.py
+
+  sarmalayici:
+    # Shell sarmalayicisi birim testlerle kapsanamiyor: orada kabuk yok.
+    # Burada gercekten kuruluyor ve gercek git hatalariyla deneniyor.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -e .
+      - name: zsh kur
+        run: sudo apt-get update && sudo apt-get install -y zsh
+      - name: bash
+        run: bash tools/sarmalayici_test.sh
+      - name: bash + GITWHY_TEE
+        run: GITWHY_TEE=1 bash tools/sarmalayici_test.sh
+      - name: zsh
+        run: zsh tools/sarmalayici_test.sh
+      - name: zsh + GITWHY_TEE
+        run: GITWHY_TEE=1 zsh tools/sarmalayici_test.sh

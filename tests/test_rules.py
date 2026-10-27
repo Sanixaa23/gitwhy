@@ -214,6 +214,73 @@ def test_metin_tabanli_fixturelerin_satirlari_kapiyi_geciyor():
         fixtures.temizle()
 
 
+def test_git_alt_komut_ayristirma():
+    assert rules.git_alt_komut("git push") == "push"
+    assert rules.git_alt_komut("git -c user.email=x push -u origin main") == "push"
+    assert rules.git_alt_komut("git -C /tmp/depo status --short") == "status"
+    assert rules.git_alt_komut("git --no-pager log") == "log"
+    assert rules.git_alt_komut("npm install") is None
+    assert rules.git_alt_komut("git") is None
+    assert rules.git_alt_komut("") is None
+    assert rules.git_alt_komut(None) is None
+
+
+def test_sarmalayici_metinsiz_komuttan_buluyor():
+    """Sarmalayici hatayi ekranda biraktigi icin metin yok, komut var.
+
+    Bu blok olmadan 5, 6 ve 11 sarmalayici uzerinden hic eslesmiyordu;
+    gercek bir depoda olculdu (bkz. tools/sarmalayici_test.sh).
+    """
+    try:
+        bekleneler = (
+            ("05_remote_yok", "git push", "05_remote_yok"),
+            ("06_upstream_yok", "git push", "06_upstream_yok"),
+            ("11_checkout_engellendi", "git checkout ozellik",
+             "11_yerel_degisiklik_engelliyor"),
+        )
+        for varyant, komut, beklenen in bekleneler:
+            fx = fixtures.kur(varyant)
+            ctx = context.topla(fx.depo)
+            assert rules.esle(ctx, "", komut) == beklenen, (
+                "%s: metinsiz eslesme basarisiz" % varyant
+            )
+    finally:
+        fixtures.temizle()
+
+
+def test_komut_tek_basina_yanlis_pozitif_vermiyor():
+    """Remote ve upstream varken basarisiz bir push komut kuralina dusmemeli."""
+    try:
+        fx = fixtures.kur("neg_main_ileride")
+        ctx = context.topla(fx.depo)
+        assert ctx.remote_var and ctx.upstream
+        assert rules.esle(ctx, "", "git push") is None
+        # Temiz depoda checkout basarisizligi da uydurulmamali.
+        fx2 = fixtures.kur("neg_temiz")
+        ctx2 = context.topla(fx2.depo)
+        assert rules.esle(ctx2, "", "git checkout main") is None
+    finally:
+        fixtures.temizle()
+
+
+def test_kayit_gecerliligi():
+    """Bayat ya da baska depoya ait kayit komut kurallarini tetiklememeli."""
+    import time
+    from gitwhy import capture
+    try:
+        fx = fixtures.kur("05_remote_yok")
+        taze = {"depo": fx.depo, "zaman": time.time(), "komut": "git push"}
+        bayat = {"depo": fx.depo, "zaman": time.time() - 3600, "komut": "git push"}
+        baska = {"depo": os.path.join(fx.depo, "baska"), "zaman": time.time(),
+                 "komut": "git push"}
+        assert capture.gecerli(taze, fx.depo)
+        assert not capture.gecerli(bayat, fx.depo)
+        assert not capture.gecerli(baska, fx.depo)
+        assert not capture.gecerli(None, fx.depo)
+    finally:
+        fixtures.temizle()
+
+
 def test_uygulanan_senaryolarin_sablonu_var():
     eksik = [s for s in rules.UYGULANAN if s not in explain.sablonlar()]
     assert not eksik, "sablonu olmayan senaryo: %s" % eksik

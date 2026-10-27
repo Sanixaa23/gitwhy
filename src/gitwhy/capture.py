@@ -52,6 +52,32 @@ def oku() -> Optional[dict]:
         return None
 
 
+AZAMI_YAS = 600.0   # saniye
+
+
+def gecerli(kayit: Optional[dict], depo: str, azami_yas: float = AZAMI_YAS) -> bool:
+    """Kayit SU ANKI depoya ve yakin gecmise mi ait.
+
+    Iki koruma: baska bir depoda kalmis kayit buraya uygulanmasin, ve
+    saatler once olmus bir hata bugunku komutun cevabi sanilmasin. Komut
+    tabanli kurallar bu kontrole guveniyor.
+    """
+    if not kayit:
+        return False
+    kayitli = os.path.normcase(os.path.abspath(kayit.get("depo") or ""))
+    simdiki = os.path.normcase(os.path.abspath(depo))
+    if kayitli != simdiki:
+        return False
+    try:
+        return (time.time() - float(kayit.get("zaman", 0))) <= azami_yas
+    except (TypeError, ValueError):
+        return False
+
+
+def komut(kayit: Optional[dict]) -> Optional[str]:
+    return (kayit or {}).get("komut") or None
+
+
 def hata_metni(kayit: Optional[dict]) -> str:
     """Kayittan karar verilecek metni cikarir.
 
