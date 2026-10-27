@@ -63,12 +63,17 @@ def _acikla(depo: str, hata_metni: str) -> int:
 
 def komut_son_hata(arg) -> int:
     kayit = capture.oku()
-    if kayit is None:
+    ctx = context.topla(arg.depo)
+    senaryo = rules.esle(ctx, capture.hata_metni(kayit))
+    # Not duyurusu yalnizca gercekten elimizde bir sey yokken: depo durumu
+    # tek basina bir senaryoya eslestiyse ozur dileyecek bir sey yok.
+    if senaryo is None and kayit is None:
         _cikti(
             "Kayitli bir hata yok. Deponun su anki durumuna bakiliyor.\n"
             "Belirli bir hatayi aciklamak icin:  gitwhy explain --stderr -\n"
         )
-    return _acikla(arg.depo, capture.hata_metni(kayit))
+    _cikti(explain.anlat(senaryo, ctx))
+    return 0 if senaryo else 1
 
 
 def komut_explain(arg) -> int:

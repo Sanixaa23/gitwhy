@@ -6,19 +6,54 @@ bir rebase var mı — ve o duruma özel düzeltme komutunu üretir. Eşleştirm
 LLM değil; ağ olmadan da çalışır. Yıkıcı komutları asla kendiliğinden çalıştırmaz, sadece
 ne sileceğini yazarak gösterir. Senaryo eşleşme doğruluğu aşağıdaki tabloda ölçülmüştür.
 
-> **Durum:** 12 senaryonun 12'si çalışıyor, 18 fixture ile ölçüldü. Eksik olanlar
-> `--ai` modu, `shell-init` doğrulaması ve README demo GIF'i.
+> **Durum:** 12 senaryonun 12'si çalışıyor, 18 fixture ile ölçüldü. Eksik olan `--ai`
+> modu ve `shell-init` doğrulaması.
+
+![gitwhy: rebase çakışması, açıklama, düzeltme](docs/demo.gif)
+
+Yukarıdaki kaydın tamamı gerçek çıktı — `python tools/demo.py` geçici bir depoyu
+bozuk duruma sokar, komutları gerçekten koşar ve yakaladığı baytı çizer. Hiçbir satır
+elle yazılmadı.
 
 ## Kurulum
 
-```
+Tek satır, bağımlılık yok:
+
+```bash
 pipx install git+https://github.com/<kullanici>/gitwhy
 ```
 
-Geliştirme için:
+`pipx` yoksa `pip install git+https://github.com/<kullanici>/gitwhy` da çalışır; pipx
+aracı kendi ortamına kurduğu için tercih edilir.
 
+Kurulumu doğrula:
+
+```bash
+gitwhy --version
+gitwhy doctor
 ```
+
+Gereken: **Python 3.9+** ve **git 2.23+** (`git switch` önerileri bunu istiyor).
+Çalıştırmak için başka hiçbir paket gerekmiyor — `pyproject.toml` içinde `dependencies`
+boş. Ağ gerekmiyor, hesap gerekmiyor, yapılandırma gerekmiyor.
+
+Kaynaktan geliştirme:
+
+```bash
+git clone https://github.com/<kullanici>/gitwhy
+cd gitwhy
 pip install -e ".[dev]"
+python -m pytest -q
+python tests/test_rules.py        # karışıklık matrisi
+```
+
+Geliştirme ve testler **git 2.28+** istiyor (`git init -b`). Demo GIF'ini üretmek için
+ayrıca `pillow` gerekir.
+
+Kurmadan denemek istersen:
+
+```bash
+PYTHONPATH=src python -m gitwhy.cli doctor
 ```
 
 ## Kullanım
@@ -30,6 +65,14 @@ gitwhy capture -- git push       # komutu koşar, başarısızsa açıklar
 gitwhy doctor                    # depo sağlığı: upstream, user.email, sahnelenmiş sır
 gitwhy shell-init bash           # git başarısız olunca otomatik devreye giren sarmalayıcı
 ```
+
+`gitwhy doctor` tek bakışta deponun sorunlarını sıralar; kırmızı satırlar ele alınması
+gerekenler:
+
+![gitwhy doctor çıktısı](docs/doctor.svg)
+
+Bu görüntü de elle alınmadı: `python tools/doctor_goruntu.py` dört ayrı sorunu olan
+gerçek bir depo kurup `gitwhy doctor` koşuyor ve çıktının kendisini çiziyor.
 
 ## Senaryolar
 
@@ -162,6 +205,46 @@ sınır koymadan aynı cevabı verir: listelenen commit'lerden hiçbir ref'ten
 erişilemeyenler. `commit --amend` de eski commit'i erişilemez bırakır, ama bu kasıtlı
 bir işlemdir — reflog'da bir üstteki girdi `commit (amend)` ise atlanıyor
 (`neg_amend` fixture'ı bunu doğruluyor).
+
+## Demo kaydını yeniden üretmek
+
+GIF ve ekran görüntüleri depoda duruyor; değiştirmek istersen iki yol var.
+
+**Windows dahil her yerde — kayıt programı (önerilen).** Adımlar
+[tools/demo.py](tools/demo.py) içindeki `ADIMLAR` listesinde; beklemeleri oradan
+ayarla.
+
+```bash
+pip install pillow
+python tools/demo.py              # docs/demo.gif + docs/demo.cast
+python tools/doctor_goruntu.py    # docs/doctor.svg + docs/doctor.png
+```
+
+Araç toplam süreyi yazdırır ve 20–30 saniye dışına çıkarsa uyarır. `--sadece-cast`
+Pillow olmadan yalnızca asciicast üretir.
+
+**Linux / macOS / WSL — gerçek terminal kaydı.** `asciinema`'nın Windows sürümü yok,
+bu yüzden bu yol yalnızca orada çalışır:
+
+```bash
+asciinema rec docs/demo.cast --cols 96 --rows 36 --overwrite \
+    --idle-time-limit 2 -c "bash tools/demo_akis.sh"
+agg --font-size 15 --theme github-dark docs/demo.cast docs/demo.gif
+```
+
+[tools/demo_akis.sh](tools/demo_akis.sh) akışı kendisi yazdığı için kaydı gözetimsiz
+alabilirsin; yazım hatası ve yeniden çekim yok. İkisi de geçici bir dizinde çalışır,
+senin deponu değiştirmez.
+
+Kaydedilen akış, 29,7 saniye:
+
+| Saniye | Ne görünüyor |
+|---|---|
+| 0–4 | `git rebase main` → `CONFLICT` ve `error: could not apply` |
+| 4–14 | `gitwhy` → ne olduğu, deponun durumu, üç seçenek ve yıkıcı olanın uyarısı |
+| 14–17 | çakışma çözülür, `git add a.txt` |
+| 17–21 | `git rebase --continue` → `Successfully rebased and updated refs/heads/ozellik.` |
+| 21–30 | `gitwhy doctor` → temiz depo |
 
 ## Lisans
 
