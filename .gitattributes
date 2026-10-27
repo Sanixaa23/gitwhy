@@ -1,0 +1,5 @@
+# Depoda her sey LF. Windows'ta CRLF'e cevrilmesi shell sarmalayicisini ve
+# satir satir ayristirilan hata metinlerini bozar.
+* text=auto eol=lf
+*.png binary
+*.gif binary
