@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "gitwhy"
 version = "0.1.0"
-description = "Bir git komutu basarisiz oldugunda deponun durumunu okur ve o duruma ozel duzeltme komutunu uretir."
+description = "When a git command fails, reads your repository's state and produces the fix for that state."
 readme = "README.md"
 requires-python = ">=3.9"
 license = { file = "LICENSE" }

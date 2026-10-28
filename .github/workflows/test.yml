@@ -6,7 +6,7 @@ on:
   pull_request:
 
 jobs:
-  senaryo-dogrulugu:
+  scenario-accuracy:
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -18,16 +18,16 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
-      - name: bagimliliklar
+      - name: dependencies
         run: python -m pip install -e ".[dev]"
-      - name: testler
+      - name: tests
         run: python -m pytest -q
-      - name: karisiklik matrisi
+      - name: confusion matrix
         run: python tests/test_rules.py
 
-  sarmalayici:
-    # Shell sarmalayicisi birim testlerle kapsanamiyor: orada kabuk yok.
-    # Burada gercekten kuruluyor ve gercek git hatalariyla deneniyor.
+  wrapper:
+    # Unit tests cannot cover the shell wrapper: there is no shell there.
+    # Here it is genuinely installed and tried against real git failures.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -35,13 +35,13 @@ jobs:
         with:
           python-version: "3.12"
       - run: python -m pip install -e .
-      - name: zsh kur
+      - name: install zsh
         run: sudo apt-get update && sudo apt-get install -y zsh
       - name: bash
-        run: bash tools/sarmalayici_test.sh
+        run: bash tools/wrapper_test.sh
       - name: bash + GITWHY_TEE
-        run: GITWHY_TEE=1 bash tools/sarmalayici_test.sh
+        run: GITWHY_TEE=1 bash tools/wrapper_test.sh
       - name: zsh
-        run: zsh tools/sarmalayici_test.sh
+        run: zsh tools/wrapper_test.sh
       - name: zsh + GITWHY_TEE
-        run: GITWHY_TEE=1 zsh tools/sarmalayici_test.sh
+        run: GITWHY_TEE=1 zsh tools/wrapper_test.sh

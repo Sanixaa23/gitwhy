@@ -1,13 +1,13 @@
-"""gitwhy komut satiri arayuzu.
+"""gitwhy command line interface.
 
-    gitwhy                           son basarisiz git komutunu acikla
-    gitwhy explain --stderr DOSYA    verilen hata ciktisini acikla (- = stdin)
-    gitwhy capture -- git push       komutu kosar, basarisizsa kaydeder
-    gitwhy doctor                    depo sagligi
-    gitwhy shell-init [bash|zsh]     sarmalayici shell kodunu yazdirir
+    gitwhy                           explain the last failed git command
+    gitwhy explain --stderr FILE     explain the given error output (- = stdin)
+    gitwhy capture -- git push       run the command, record it if it fails
+    gitwhy doctor                    repository health
+    gitwhy shell-init [bash|zsh]     print the wrapper shell code
 
-Hicbir alt komut depoyu degistirmez. `capture` kullanicinin verdigi komutu
-oldugu gibi kosar; kendiliginden komut uretmez.
+No subcommand modifies the repository. `capture` runs exactly the command the
+user gave it; it never invents one.
 """
 from __future__ import annotations
 
@@ -19,208 +19,207 @@ import sys
 
 from . import __version__, capture, context, explain, rules
 
-# Sarmalayici iki kabukta da ayni isi yapiyor; tek fark boru hattinin
-# cikis kodunu okuma bicimi: bash'te ${PIPESTATUS[0]}, zsh'te
-# ${pipestatus[1]} (zsh dizileri 1'den basliyor).
-_SARMALAYICI_GOVDE = """# gitwhy sarmalayicisi - {dosya} icine ekle
-# Kaldirmak icin: unset -f git
+# The wrapper does the same job in both shells; the only difference is how the
+# pipeline's exit code is read: ${PIPESTATUS[0]} in bash, ${pipestatus[1]} in
+# zsh (zsh arrays are 1-based).
+_WRAPPER_BODY = """# gitwhy shell wrapper - add this to {file}
+# To remove it: unset -f git
 #
-# Varsayilan: git'in ciktisina dokunulmaz, yalnizca komut ve cikis kodu
-# kaydedilir. Bu haliyle 12 senaryodan 10'u bulunabiliyor.
-# GITWHY_TEE=1: stderr ayrica bir dosyaya kopyalanir, boylece push reddi
-# (senaryo 7 ve 8) de bulunur. Bedeli: stderr artik terminale dogrudan
-# bagli olmadigi icin git ilerleme cubuklarini ("Writing objects: ...")
-# yazdirmaz. Istersen ac, varsayilan kapali.
+# Default: git's output is untouched, only the command and exit code are
+# recorded. In this mode 10 of the 12 scenarios can still be found.
+# GITWHY_TEE=1: stderr is also copied to a file, which additionally finds
+# push rejections (scenarios 7 and 8). The cost: stderr is no longer attached
+# to the terminal, so git stops printing progress bars ("Writing objects:
+# ..."). Turn it on if you want it; off by default.
 git() {{
   command -v gitwhy >/dev/null 2>&1 || {{ command git "$@"; return $?; }}
-  local kod
+  local code
   if [ "${{GITWHY_TEE:-0}}" = "1" ]; then
-    local gw_hata="${{TMPDIR:-/tmp}}/gitwhy-stderr.$$"
-    {{ command git "$@" 2>&1 1>&3 | tee "$gw_hata" >&2; }} 3>&1
-    kod={pipestatus}
-    command gitwhy capture-exit "$kod" "git $*" \\
-        --stderr-dosyasi "$gw_hata" >/dev/null 2>&1
-    rm -f "$gw_hata"
+    local gw_err="${{TMPDIR:-/tmp}}/gitwhy-stderr.$$"
+    {{ command git "$@" 2>&1 1>&3 | tee "$gw_err" >&2; }} 3>&1
+    code={pipestatus}
+    command gitwhy capture-exit "$code" "git $*" \\
+        --stderr-file "$gw_err" >/dev/null 2>&1
+    rm -f "$gw_err"
   else
     command git "$@"
-    kod=$?
-    command gitwhy capture-exit "$kod" "git $*" >/dev/null 2>&1
+    code=$?
+    command gitwhy capture-exit "$code" "git $*" >/dev/null 2>&1
   fi
-  # 130 = Ctrl-C. Kullanici kendisi kesti, aciklanacak bir hata yok.
-  if [ "$kod" -ne 0 ] && [ "$kod" -ne 130 ]; then
+  # 130 = Ctrl-C. The user stopped it themselves; there is no error to explain.
+  if [ "$code" -ne 0 ] && [ "$code" -ne 130 ]; then
     command gitwhy
   fi
-  return $kod
+  return $code
 }}
 """
 
-SARMALAYICI = {
-    "bash": _SARMALAYICI_GOVDE.format(
-        dosya="~/.bashrc", pipestatus="${PIPESTATUS[0]}"),
-    "zsh": _SARMALAYICI_GOVDE.format(
-        dosya="~/.zshrc", pipestatus="${pipestatus[1]}"),
+WRAPPER = {
+    "bash": _WRAPPER_BODY.format(file="~/.bashrc", pipestatus="${PIPESTATUS[0]}"),
+    "zsh": _WRAPPER_BODY.format(file="~/.zshrc", pipestatus="${pipestatus[1]}"),
 }
 
 
-def _cikti(metin: str) -> None:
-    """Windows konsolunda cp1254 hatasi vermeden yazdirir."""
+def _out(text: str) -> None:
+    """Print without blowing up on a Windows console that is not UTF-8."""
     try:
-        sys.stdout.write(metin + "\n")
+        sys.stdout.write(text + "\n")
     except UnicodeEncodeError:
-        kodlama = sys.stdout.encoding or "utf-8"
-        sys.stdout.write(metin.encode(kodlama, "replace").decode(kodlama) + "\n")
+        encoding = sys.stdout.encoding or "utf-8"
+        sys.stdout.write(text.encode(encoding, "replace").decode(encoding) + "\n")
 
 
-def _acikla(depo: str, hata_metni: str, komut: str = None) -> int:
-    ctx = context.topla(depo)
-    senaryo = rules.esle(ctx, hata_metni, komut)
-    _cikti(explain.anlat(senaryo, ctx))
-    return 0 if senaryo else 1
+def _explain(repo: str, error_text: str, command: str = None) -> int:
+    ctx = context.collect(repo)
+    scenario = rules.match(ctx, error_text, command)
+    _out(explain.explain(scenario, ctx))
+    return 0 if scenario else 1
 
 
-def komut_son_hata(arg) -> int:
-    ctx = context.topla(arg.depo)
-    kayit = capture.oku()
-    # Baska depoya ait ya da bayatlamis kayit kullanilmaz.
-    if not capture.gecerli(kayit, ctx.depo):
-        kayit = None
-    senaryo = rules.esle(ctx, capture.hata_metni(kayit), capture.komut(kayit))
-    # Not duyurusu yalnizca gercekten elimizde bir sey yokken: depo durumu
-    # tek basina bir senaryoya eslestiyse ozur dileyecek bir sey yok.
-    if senaryo is None and kayit is None:
-        _cikti(
-            "Kayitli bir hata yok. Deponun su anki durumuna bakiliyor.\n"
-            "Belirli bir hatayi aciklamak icin:  gitwhy explain --stderr -\n"
+def cmd_last_error(arg) -> int:
+    ctx = context.collect(arg.repo)
+    record = capture.read()
+    # A record from another repository, or a stale one, is not used.
+    if not capture.is_valid(record, ctx.repo):
+        record = None
+    scenario = rules.match(ctx, capture.error_text(record), capture.command(record))
+    # Only announce the missing record when we genuinely have nothing: if the
+    # repository state alone matched a scenario there is nothing to apologise for.
+    if scenario is None and record is None:
+        _out(
+            "No recorded error. Looking at the repository's current state.\n"
+            "To explain a specific error:  gitwhy explain --stderr -\n"
         )
-    _cikti(explain.anlat(senaryo, ctx))
-    return 0 if senaryo else 1
+    _out(explain.explain(scenario, ctx))
+    return 0 if scenario else 1
 
 
-def komut_explain(arg) -> int:
+def cmd_explain(arg) -> int:
     if arg.stderr == "-":
-        metin = io.TextIOWrapper(sys.stdin.buffer, encoding="utf-8", errors="replace").read()
+        text = io.TextIOWrapper(sys.stdin.buffer, encoding="utf-8", errors="replace").read()
     else:
         with open(arg.stderr, encoding="utf-8", errors="replace") as f:
-            metin = f.read()
-    return _acikla(arg.depo, metin)
+            text = f.read()
+    return _explain(arg.repo, text)
 
 
-def komut_capture(arg) -> int:
-    """Verilen komutu kosar; basarisiz olursa kaydeder ve aciklar."""
-    if not arg.komut:
-        _cikti("Kullanim: gitwhy capture -- git push")
+def cmd_capture(arg) -> int:
+    """Run the given command; if it fails, record and explain it."""
+    if not arg.command:
+        _out("Usage: gitwhy capture -- git push")
         return 2
-    p = subprocess.run(arg.komut, capture_output=True)
+    p = subprocess.run(arg.command, capture_output=True)
     out = p.stdout.decode("utf-8", "replace")
     err = p.stderr.decode("utf-8", "replace")
     sys.stdout.write(out)
     sys.stderr.write(err)
     if p.returncode == 0:
         return 0
-    capture.yaz(" ".join(arg.komut), p.returncode, out, err, arg.depo)
-    _cikti("")
-    _acikla(arg.depo, err + "\n" + out, " ".join(arg.komut))
+    capture.write(" ".join(arg.command), p.returncode, out, err, arg.repo)
+    _out("")
+    _explain(arg.repo, err + "\n" + out, " ".join(arg.command))
     return p.returncode
 
 
-def komut_capture_exit(arg) -> int:
-    """Shell sarmalayicisi icin kayit.
+def cmd_capture_exit(arg) -> int:
+    """Record for the shell wrapper.
 
-    Varsayilan olarak cikti zaten ekranda kaldigi icin yalnizca komut ve
-    cikis kodu kaydedilir; kurallar metinsiz de 5, 6 ve 11'i bulabiliyor.
-    GITWHY_TEE=1 ile sarmalayici stderr'i bir dosyaya da yazar ve o dosyayi
-    buraya verir; 7 ve 8 ancak o zaman eslesir.
+    By default the output is already on screen, so only the command and exit
+    code are stored; the rules can still find scenarios 5, 6 and 11 without
+    any text. With GITWHY_TEE=1 the wrapper also writes stderr to a file and
+    passes it here; only then do scenarios 7 and 8 match.
     """
-    metin = ""
-    if arg.stderr_dosyasi:
+    text = ""
+    if arg.stderr_file:
         try:
-            with open(arg.stderr_dosyasi, encoding="utf-8", errors="replace") as f:
-                metin = f.read()
+            with open(arg.stderr_file, encoding="utf-8", errors="replace") as f:
+                text = f.read()
         except OSError:
-            metin = ""
-    capture.yaz(arg.komut_metni, arg.kod, "", metin, arg.depo)
+            text = ""
+    capture.write(arg.command_text, arg.code, "", text, arg.repo)
     return 0
 
 
-def komut_doctor(arg) -> int:
-    ctx = context.topla(arg.depo)
-    if not ctx.gecerli_depo:
-        _cikti("Burasi bir git deposu degil: %s" % ctx.depo)
+_RISKY = (".env", "id_rsa", "credentials.json", ".pem", ".p12", ".keystore")
+
+
+def _is_risky(path: str) -> bool:
+    name = path.replace("\\", "/").split("/")[-1].lower()
+    return any(name == r or name.endswith(r) for r in _RISKY)
+
+
+def cmd_doctor(arg) -> int:
+    ctx = context.collect(arg.repo)
+    if not ctx.is_repo:
+        _out("Not a git repository: %s" % ctx.repo)
         return 1
-    satir = ["# gitwhy doctor — %s" % ctx.depo, ""]
-    satir.append("branch            : %s" % (ctx.branch or "(detached)"))
-    satir.append("upstream          : %s" % (ctx.upstream or "yok"))
-    satir.append("ileri / geri      : +%d / -%d" % (ctx.ileri, ctx.geri))
-    satir.append("remote            : %s" % (", ".join(ctx.remoteler) or "yok"))
-    satir.append("surmekte islem    : %s" % (", ".join(ctx.surmekte) or "yok"))
-    satir.append("cakisan dosya     : %d" % len(ctx.cakisan))
-    satir.append("kaydedilmemis     : %d" % len(ctx.kaydedilmemis))
-    satir.append("erisilemez commit : %s" % (
-        ", ".join("%s (%s)" % (s[:8], konu) for s, konu, _ in ctx.kayip) or "yok"))
-    satir.append("user.email        : %s" % (ctx.user_email or "TANIMLI DEGIL"))
-    gitignore = os.path.exists(os.path.join(ctx.depo, ".gitignore"))
-    satir.append(".gitignore        : %s" % ("var" if gitignore else "YOK"))
-    riskli = [y for y in ctx.sahnelenen if _riskli_yol(y)]
-    satir.append("sahnelenmis sir   : %s" % (", ".join(riskli) or "yok"))
-    _cikti("\n".join(satir))
+    lines = ["# gitwhy doctor — %s" % ctx.repo, ""]
+    lines.append("branch             : %s" % (ctx.branch or "(detached)"))
+    lines.append("upstream           : %s" % (ctx.upstream or "none"))
+    lines.append("ahead / behind     : +%d / -%d" % (ctx.ahead, ctx.behind))
+    lines.append("remote             : %s" % (", ".join(ctx.remotes) or "none"))
+    lines.append("operation running  : %s" % (", ".join(ctx.in_progress) or "none"))
+    lines.append("conflicted files   : %d" % len(ctx.conflicted))
+    lines.append("unstaged changes   : %d" % len(ctx.unstaged))
+    lines.append("unreachable commits: %s" % (
+        ", ".join("%s (%s)" % (sha[:8], subject) for sha, subject, _ in ctx.lost)
+        or "none"))
+    lines.append("user.email         : %s" % (ctx.user_email or "NOT SET"))
+    gitignore = os.path.exists(os.path.join(ctx.repo, ".gitignore"))
+    lines.append(".gitignore         : %s" % ("present" if gitignore else "MISSING"))
+    risky = [p for p in ctx.staged if _is_risky(p)]
+    lines.append("staged secrets     : %s" % (", ".join(risky) or "none"))
+    _out("\n".join(lines))
     return 0
 
 
-_RISKLI = (".env", "id_rsa", "credentials.json", ".pem", ".p12", ".keystore")
-
-
-def _riskli_yol(yol: str) -> bool:
-    ad = yol.replace("\\", "/").split("/")[-1].lower()
-    return any(ad == r or ad.endswith(r) for r in _RISKLI)
-
-
-def komut_shell_init(arg) -> int:
-    kod = SARMALAYICI.get(arg.kabuk)
-    if kod is None:
-        _cikti("Desteklenen kabuklar: bash, zsh. PowerShell kapsam disi.")
+def cmd_shell_init(arg) -> int:
+    code = WRAPPER.get(arg.shell)
+    if code is None:
+        _out("Supported shells: bash, zsh. PowerShell is out of scope.")
         return 2
-    sys.stdout.write(kod)
+    sys.stdout.write(code)
     return 0
 
 
 def main(argv=None) -> int:
-    ayristirici = argparse.ArgumentParser(
+    parser = argparse.ArgumentParser(
         prog="gitwhy",
-        description="Git hatalarini deponun durumunu okuyarak aciklar.",
+        description="Explains git errors by reading your repository's state.",
     )
-    ayristirici.add_argument("--version", action="version", version="gitwhy " + __version__)
-    ayristirici.add_argument("--depo", default=".", help="incelenecek depo (varsayilan: .)")
-    alt = ayristirici.add_subparsers(dest="alt_komut")
+    parser.add_argument("--version", action="version", version="gitwhy " + __version__)
+    parser.add_argument("--repo", default=".", help="repository to inspect (default: .)")
+    sub = parser.add_subparsers(dest="subcommand")
 
-    p = alt.add_parser("explain", help="verilen hata ciktisini acikla")
-    p.add_argument("--stderr", required=True, help="hata ciktisi dosyasi, - = stdin")
-    p.add_argument("--depo", default=".")
-    p.set_defaults(islev=komut_explain)
+    p = sub.add_parser("explain", help="explain the given error output")
+    p.add_argument("--stderr", required=True, help="error output file, - = stdin")
+    p.add_argument("--repo", default=".")
+    p.set_defaults(func=cmd_explain)
 
-    p = alt.add_parser("capture", help="komutu kosar, basarisizsa aciklar")
-    p.add_argument("komut", nargs=argparse.REMAINDER)
-    p.add_argument("--depo", default=".")
-    p.set_defaults(islev=komut_capture)
+    p = sub.add_parser("capture", help="run a command and explain it if it fails")
+    p.add_argument("command", nargs=argparse.REMAINDER)
+    p.add_argument("--repo", default=".")
+    p.set_defaults(func=cmd_capture)
 
-    p = alt.add_parser("capture-exit", help="shell sarmalayicisi icin kayit")
-    p.add_argument("kod", type=int)
-    p.add_argument("komut_metni")
-    p.add_argument("--stderr-dosyasi", dest="stderr_dosyasi", default=None,
-                   help="GITWHY_TEE=1 modunda sarmalayicinin yazdigi hata dosyasi")
-    p.add_argument("--depo", default=".")
-    p.set_defaults(islev=komut_capture_exit)
+    p = sub.add_parser("capture-exit", help="record written by the shell wrapper")
+    p.add_argument("code", type=int)
+    p.add_argument("command_text")
+    p.add_argument("--stderr-file", dest="stderr_file", default=None,
+                   help="error file written by the wrapper under GITWHY_TEE=1")
+    p.add_argument("--repo", default=".")
+    p.set_defaults(func=cmd_capture_exit)
 
-    p = alt.add_parser("doctor", help="depo sagligi")
-    p.add_argument("--depo", default=".")
-    p.set_defaults(islev=komut_doctor)
+    p = sub.add_parser("doctor", help="repository health")
+    p.add_argument("--repo", default=".")
+    p.set_defaults(func=cmd_doctor)
 
-    p = alt.add_parser("shell-init", help="sarmalayici shell kodunu yazdirir")
-    p.add_argument("kabuk", nargs="?", default="bash", choices=["bash", "zsh"])
-    p.set_defaults(islev=komut_shell_init)
+    p = sub.add_parser("shell-init", help="print the wrapper shell code")
+    p.add_argument("shell", nargs="?", default="bash", choices=["bash", "zsh"])
+    p.set_defaults(func=cmd_shell_init)
 
-    arg = ayristirici.parse_args(argv)
-    islev = getattr(arg, "islev", komut_son_hata)
-    return islev(arg)
+    arg = parser.parse_args(argv)
+    func = getattr(arg, "func", cmd_last_error)
+    return func(arg)
 
 
 if __name__ == "__main__":

@@ -1,299 +1,304 @@
 # gitwhy
 
-`gitwhy`, bir git komutu başarısız olduğunda hatayı tekrar etmez: deponun o anki durumunu
-okur — hangi branch'tesin, kaç commit geride kaldın, hangi dosyalar çakışıyor, yarım kalmış
-bir rebase var mı — ve o duruma özel düzeltme komutunu üretir. Eşleştirme deterministik,
-LLM değil; ağ olmadan da çalışır. Yıkıcı komutları asla kendiliğinden çalıştırmaz, sadece
-ne sileceğini yazarak gösterir. Senaryo eşleşme doğruluğu aşağıdaki tabloda ölçülmüştür.
+When a git command fails, `gitwhy` does not repeat the error back at you: it reads your
+repository's current state — which branch you are on, how far behind you fell, which
+files conflict, whether a rebase is half-finished — and produces the fix for *that* state.
+The matching is deterministic, not an LLM; it works with no network. It never runs
+destructive commands for you, it only shows them and says what they delete. Measured
+scenario accuracy is in the table below.
 
-> **Durum:** 12 senaryonun 12'si çalışıyor, 18 fixture ile ölçüldü. Eksik olan `--ai`
-> modu ve `shell-init` doğrulaması.
+> **Status:** all 12 scenarios work, measured with 18 fixtures. Not built yet: the `--ai`
+> mode.
 
-![gitwhy: rebase çakışması, açıklama, düzeltme](docs/demo.gif)
+![gitwhy: a rebase conflict, the explanation, the fix](docs/demo.gif)
 
-Yukarıdaki kaydın tamamı gerçek çıktı — `python tools/demo.py` geçici bir depoyu
-bozuk duruma sokar, komutları gerçekten koşar ve yakaladığı baytı çizer. Hiçbir satır
-elle yazılmadı.
+Every frame above is real output — `python tools/demo.py` puts a temporary repository
+into a broken state, actually runs the commands, and draws the bytes it captured. No line
+was written by hand.
 
-## Kurulum
+## Install
 
-Tek satır, bağımlılık yok:
+One line, no dependencies:
 
 ```bash
-pipx install git+https://github.com/<kullanici>/gitwhy
+pipx install git+https://github.com/<user>/gitwhy
 ```
 
-`pipx` yoksa `pip install git+https://github.com/<kullanici>/gitwhy` da çalışır; pipx
-aracı kendi ortamına kurduğu için tercih edilir.
+Without pipx, `pip install git+https://github.com/<user>/gitwhy` works too; pipx is
+preferred because it installs the tool into its own environment.
 
-Kurulumu doğrula:
+Check the install:
 
 ```bash
 gitwhy --version
 gitwhy doctor
 ```
 
-Gereken: **Python 3.9+** ve **git 2.23+** (`git switch` önerileri bunu istiyor).
-Çalıştırmak için başka hiçbir paket gerekmiyor — `pyproject.toml` içinde `dependencies`
-boş. Ağ gerekmiyor, hesap gerekmiyor, yapılandırma gerekmiyor.
+Requires **Python 3.9+** and **git 2.23+** (the `git switch` suggestions need it). Nothing
+else is needed to run it — `dependencies` in `pyproject.toml` is empty. No network, no
+account, no configuration.
 
-Kaynaktan geliştirme:
+From source, for development:
 
 ```bash
-git clone https://github.com/<kullanici>/gitwhy
+git clone https://github.com/<user>/gitwhy
 cd gitwhy
 pip install -e ".[dev]"
 python -m pytest -q
-python tests/test_rules.py        # karışıklık matrisi
+python tests/test_rules.py        # the confusion matrix
 ```
 
-Geliştirme ve testler **git 2.28+** istiyor (`git init -b`). Demo GIF'ini üretmek için
-ayrıca `pillow` gerekir.
+Development and the tests need **git 2.28+** (`git init -b`). Producing the demo GIF also
+needs `pillow`.
 
-Kurmadan denemek istersen:
+To try it without installing:
 
 ```bash
 PYTHONPATH=src python -m gitwhy.cli doctor
 ```
 
-## Kullanım
+## Usage
 
 ```
-gitwhy                           # son başarısız git komutunu açıkla
-gitwhy explain --stderr hata.txt # verilen hata çıktısını açıkla (- = stdin)
-gitwhy capture -- git push       # komutu koşar, başarısızsa açıklar
-gitwhy doctor                    # depo sağlığı: upstream, user.email, sahnelenmiş sır
-gitwhy shell-init bash           # git başarısız olunca otomatik devreye giren sarmalayıcı
+gitwhy                           # explain the last failed git command
+gitwhy explain --stderr err.txt  # explain the given error output (- = stdin)
+gitwhy capture -- git push       # run the command, explain it if it fails
+gitwhy doctor                    # repo health: upstream, user.email, staged secrets
+gitwhy shell-init bash           # wrapper that fires automatically when git fails
 ```
 
-`gitwhy doctor` tek bakışta deponun sorunlarını sıralar; kırmızı satırlar ele alınması
-gerekenler:
+`gitwhy doctor` lists a repository's problems at a glance; the red lines are the ones to
+deal with:
 
-![gitwhy doctor çıktısı](docs/doctor.svg)
+![gitwhy doctor output](docs/doctor.svg)
 
-Bu görüntü de elle alınmadı: `python tools/doctor_goruntu.py` dört ayrı sorunu olan
-gerçek bir depo kurup `gitwhy doctor` koşuyor ve çıktının kendisini çiziyor.
+This image was not captured by hand either: `python tools/doctor_image.py` builds a real
+repository with four separate problems, runs `gitwhy doctor`, and draws the output.
 
-### Shell sarmalayıcısı (isteğe bağlı)
+### Shell wrapper (optional)
 
-Kurarsan `gitwhy` yazman gerekmez: git başarısız olduğunda kendiliğinden devreye girer.
+Install it and you no longer type `gitwhy`: it fires on its own when git fails.
 
 ```bash
-gitwhy shell-init bash >> ~/.bashrc     # zsh için: gitwhy shell-init zsh >> ~/.zshrc
+gitwhy shell-init bash >> ~/.bashrc     # for zsh: gitwhy shell-init zsh >> ~/.zshrc
 ```
 
-Kaldırmak için satırı sil, ya da o oturumda `unset -f git`.
+Remove it by deleting that line, or with `unset -f git` for the current session.
 
-Sarmalayıcı git'in çıktısına dokunmaz; yalnızca komutu ve çıkış kodunu kaydeder. Hatanın
-**metni** kaydedilmediği için kararı deponun durumu ve çalıştırdığın komut verir — bu
-haliyle 12 senaryodan 10'u bulunur. Bulunamayan ikisi, uzak tarafın cevabına bağlı
-olanlar: push reddi (7) ve korumalı branch (8).
+The wrapper does not touch git's output; it records only the command and the exit code.
+Because the error **text** is not recorded, the decision comes from repository state plus
+the command you ran — which still finds 10 of the 12 scenarios. The two it cannot reach
+are the ones that depend on the remote's answer: push rejection (7) and protected branch
+(8).
 
-İkisini de istiyorsan stderr kopyalamayı aç:
+To get those two as well, turn on stderr copying:
 
 ```bash
 export GITWHY_TEE=1
 ```
 
-**Bedeli var:** stderr artık doğrudan terminale bağlı olmadığı için git ilerleme
-çubuklarını (`Writing objects: ...`) yazdırmaz — git ilerlemeyi yalnızca stderr bir
-terminale bağlıyken gösteriyor. Bu yüzden varsayılan kapalı.
+**It has a cost:** stderr is no longer attached to the terminal, so git stops printing
+progress bars (`Writing objects: ...`) — git only shows progress while stderr is a
+terminal. That is why it is off by default.
 
-Sarmalayıcının kendisi `Ctrl-C` ile kesilen komutlarda (çıkış kodu 130) devreye girmez
-ve `gitwhy` PATH'te yoksa sessizce çekilir, git'i bozmaz.
+The wrapper stays out of the way for commands you interrupt with `Ctrl-C` (exit code 130),
+and if `gitwhy` is not on PATH it steps aside silently rather than breaking git.
 
-Sarmalayıcı birim testlerle kapsanamıyor, çünkü orada kabuk yok.
-[tools/sarmalayici_test.sh](tools/sarmalayici_test.sh) onu gerçekten kurup gerçek git
-hatalarıyla deniyor; CI bunu bash ve zsh ile, iki modda da koşuyor:
+Unit tests cannot cover the wrapper, because there is no shell there.
+[tools/wrapper_test.sh](tools/wrapper_test.sh) installs it for real and tries it against
+real git failures; CI runs that under both bash and zsh, in both modes:
 
 ```bash
-bash tools/sarmalayici_test.sh
-GITWHY_TEE=1 bash tools/sarmalayici_test.sh
+bash tools/wrapper_test.sh
+GITWHY_TEE=1 bash tools/wrapper_test.sh
 ```
 
-## Senaryolar
+## Scenarios
 
-| # | Senaryo | Durum | Tespit sinyali |
+| # | Scenario | Status | Detection signal |
 |---|---|---|---|
-| 1 | Detached HEAD | ✅ | `# branch.head (detached)` **ve** sürmekte işlem yok |
-| 2 | Merge çakışması | ✅ | `u ` satırları > 0 veya `MERGE_HEAD` |
-| 3 | Rebase ortasında kalmış | ✅ | `.git/rebase-merge` veya `rebase-apply` |
-| 4 | Cherry-pick / revert ortasında | ✅ | `CHERRY_PICK_HEAD` / `REVERT_HEAD` |
-| 5 | Remote hiç yok | ✅ | `fatal: No configured push destination.` |
-| 6 | Remote var, upstream yok | ✅ | `has no upstream branch` |
-| 7 | Push reddedildi (geride kalmış) | ✅ | `! [rejected]` / `fetch first` (**`branch.ab` değil**) |
-| 8 | Yanlış branch'e commit | ✅ | `! [remote rejected]` / `pre-receive hook declined` |
-| 9 | `node_modules` sahnelenmiş | ✅ | staged yol parçası bağımlılık dizini |
-| 10 | `.env` / anahtar sahnelenmiş | ✅ | staged dosya adı `.env`, `*.pem`, `id_rsa` |
-| 11 | Yerel değişiklik checkout'u engelliyor | ✅ | `would be overwritten` |
-| 12 | Kaybolmuş commit | ✅ | reflog'un son 10 girdisinde, hiçbir ref'ten erişilemeyen commit |
+| 1 | Detached HEAD | ✅ | `# branch.head (detached)` **and** no operation in progress |
+| 2 | Merge conflict | ✅ | `u ` lines > 0, or `MERGE_HEAD` |
+| 3 | Rebase left half-finished | ✅ | `.git/rebase-merge` or `rebase-apply` |
+| 4 | Cherry-pick / revert in progress | ✅ | `CHERRY_PICK_HEAD` / `REVERT_HEAD` |
+| 5 | No remote at all | ✅ | `fatal: No configured push destination.` |
+| 6 | Remote exists, no upstream | ✅ | `has no upstream branch` |
+| 7 | Push rejected (behind) | ✅ | `! [rejected]` / `fetch first` (**not `branch.ab`**) |
+| 8 | Committed to the wrong branch | ✅ | `! [remote rejected]` / `pre-receive hook declined` |
+| 9 | `node_modules` staged | ✅ | a staged path component is a dependency directory |
+| 10 | `.env` / key staged | ✅ | staged file named `.env`, `*.pem`, `id_rsa` |
+| 11 | Local changes block a checkout | ✅ | `would be overwritten` |
+| 12 | Lost commit | ✅ | in the last 10 reflog entries, unreachable from every ref |
 
-Kapsam burada duruyor. "Tüm git hatalarını çözer" diye bir iddia yok.
+Scope stops here. There is no claim that this "solves every git error".
 
-**Senaryo 8'in durum tabanlı hali bilerek yok.** "main'de gönderilmemiş commit var"
-sinyali, tek başına çalışan birinin tamamen normal halinden ayırt edilemiyor —
-`neg_main_ileride` fixture'ı bunu gösteriyor. Bu yüzden senaryo 8 yalnızca uzak tarafın
-reddiyle tespit ediliyor. Yanlış pozitif vermemek, kapsamı genişletmekten önce gelir.
+**There is deliberately no state-based form of scenario 8.** The signal "main has unpushed
+commits" cannot be told apart from the perfectly normal state of someone working alone —
+the `neg_main_ahead` fixture shows exactly that. So scenario 8 is detected only by the
+remote's refusal. Not producing false positives comes before widening coverage.
 
-## Ölçülmüş senaryo doğruluğu
+## Measured scenario accuracy
 
-`tests/fixtures.py` her senaryo için **gerçek** bir git deposu kurar ve onu o bozuk duruma
-sokar; kural motoru o depoyu okuyarak tahmin eder. Matris `python tests/test_rules.py`
-çıktısıdır.
-
-```
-gercek \ tahmin     01   02   03   04   05   06   07   08   09   10   11   12  yok
-01                   1    0    0    0    0    0    0    0    0    0    0    0    0
-02                   0    1    0    0    0    0    0    0    0    0    0    0    0
-03                   0    0    1    0    0    0    0    0    0    0    0    0    0
-04                   0    0    0    2    0    0    0    0    0    0    0    0    0
-05                   0    0    0    0    1    0    0    0    0    0    0    0    0
-06                   0    0    0    0    0    1    0    0    0    0    0    0    0
-07                   0    0    0    0    0    0    1    0    0    0    0    0    0
-08                   0    0    0    0    0    0    0    1    0    0    0    0    0
-09                   0    0    0    0    0    0    0    0    1    0    0    0    0
-10                   0    0    0    0    0    0    0    0    0    1    0    0    0
-11                   0    0    0    0    0    0    0    0    0    0    2    0    0
-12                   0    0    0    0    0    0    0    0    0    0    0    2    0
-yok                  0    0    0    0    0    0    0    0    0    0    0    0    3
-
-12 senaryo, 18 fixture, 18/18 dogru eslesme (%100)
-```
-
-Son satır ve son kolon **negatif kontroller**: sorunsuz depo, `commit --amend` sonrası ve
-main'de gönderilmemiş commit. Bu üçü hiçbir senaryoya eşleşmemeli; o köşegen hücresi
-"yanlış pozitif vermedi" demek. Senaryo sayısından çok fixture olması, aynı senaryonun
-farklı yollardan oluşmasından geliyor: cherry-pick ve revert aynı satıra düşer, checkout
-ve merge engellenmesi aynı satıra düşer, `reset --hard` ve silinmiş branch aynı satıra
-düşer.
-
-Her PR'da GitHub Actions bu matrisi yeniden ölçer.
-
-## Güvenlik
-
-1. Araç hiçbir koşulda yıkıcı bir komutu kendiliğinden çalıştırmaz. Komutu ekrana yazar;
-   kopyalama kararı kullanıcınındır.
-2. `--run` seçeneği eklenirse yıkıcı komutlar listenin dışında kalır. Yalnızca geri
-   alınabilir komutlar (`git switch`, `git stash push`, `git branch`) otomatik koşabilir.
-3. Her öneri, o komutun neyi **kalıcı olarak** sileceğini açıkça yazar.
-4. `tests/test_safety.py` bu kuralı test eder: yıkıcı komut içeren her şablonun uyarı
-   satırı taşıdığını ve otomatik çalıştırma listesinde yıkıcı komut olmadığını doğrular.
-   `context.py`'nin depoyu değiştiren hiçbir git komutu içermediği de testle garantidir.
-
-## Mimari
+`tests/fixtures.py` builds a **real** git repository for each scenario and puts it into
+that broken state; the rule engine then predicts by reading that repository. The matrix is
+the output of `python tests/test_rules.py`.
 
 ```
-capture.py   son başarısız komutu diske yazar / okur
-context.py   salt-okunur git sorguları -> tek bir Baglam nesnesi
-rules.py     (baglam, hata_metni) -> senaryo kimliği. Saf fonksiyon, I/O yok, LLM yok
-explain.py   senaryo kimliği + baglam -> metin. scenarios/*.md şablonları
-cli.py       argparse, 5 alt komut
+truth \ prediction   01   02   03   04   05   06   07   08   09   10   11   12 none
+01                    1    0    0    0    0    0    0    0    0    0    0    0    0
+02                    0    1    0    0    0    0    0    0    0    0    0    0    0
+03                    0    0    1    0    0    0    0    0    0    0    0    0    0
+04                    0    0    0    2    0    0    0    0    0    0    0    0    0
+05                    0    0    0    0    1    0    0    0    0    0    0    0    0
+06                    0    0    0    0    0    1    0    0    0    0    0    0    0
+07                    0    0    0    0    0    0    1    0    0    0    0    0    0
+08                    0    0    0    0    0    0    0    1    0    0    0    0    0
+09                    0    0    0    0    0    0    0    0    1    0    0    0    0
+10                    0    0    0    0    0    0    0    0    0    1    0    0    0
+11                    0    0    0    0    0    0    0    0    0    0    2    0    0
+12                    0    0    0    0    0    0    0    0    0    0    0    2    0
+none                  0    0    0    0    0    0    0    0    0    0    0    0    3
+
+12 scenarios, 18 fixtures, 18/18 correct (100%)
 ```
 
-Bağlamın çoğu tek komuttan gelir:
+The last row and column are **negative controls**: a clean repository, a repository after
+`commit --amend`, and main with an unpushed commit. None of the three may match any
+scenario; that diagonal cell means "produced no false positive". There are more fixtures
+than scenarios because one scenario can be reached several ways: cherry-pick and revert
+land on the same row, a blocked checkout and a blocked merge land on the same row, and
+`reset --hard` and a deleted branch land on the same row.
+
+GitHub Actions re-measures this matrix on every PR.
+
+## Safety
+
+1. The tool never runs a destructive command on its own. It prints the command; copying
+   it is the user's decision.
+2. If a `--run` option is ever added, destructive commands stay out of it. Only
+   reversible ones (`git switch`, `git stash push`, `git branch`) could run automatically.
+3. Every suggestion states plainly what the command deletes **permanently**.
+4. `tests/test_safety.py` enforces this: it checks that every template containing a
+   destructive command carries a warning line, and that the auto-run list holds no
+   destructive command. It also guarantees by test that `context.py` contains no
+   repo-modifying git command.
+
+## Architecture
+
+```
+capture.py   records / reads the last failed command
+context.py   read-only git queries -> a single Context object
+rules.py     (context, error text, command) -> scenario id. Pure, no I/O, no LLM
+explain.py   scenario id + context -> text, from the scenarios/*.md templates
+cli.py       argparse, 5 subcommands
+```
+
+Most of the context comes from one command:
 
 ```
 git status --porcelain=v2 --branch
 ```
 
-Bu tek çağrı `branch.head` (detached ise literal `(detached)`), `branch.upstream`,
-`branch.ab +ileri -geri` ve `u ` ile başlayan çakışan dosya satırlarını verir.
+That single call yields `branch.head` (the literal `(detached)` when detached),
+`branch.upstream`, `branch.ab +ahead -behind`, the conflicted files on `u ` lines, and the
+unstaged changes on `1 `/`2 ` lines.
 
-### Fixture testlerinde doğrulanan üç kural
+### Eight findings the fixture tests produced
 
-**1. Rebase'i detached HEAD'den önce kontrol et.** Rebase çakışmasının ortasında
-`git status` aynı anda `(detached)` *ve* `rebase-merge` gösterir. Detached'ı önce
-kontrol eden bir motor, rebase'in ortasındaki kullanıcıya tamamen yanlış komut önerir.
-Doğru sıra: sürmekte olan işlem → çakışma → hata metni → detached.
-`test_rebase_detached_oncesinde_kontrol_ediliyor` bu sıranın bozulmasını yakalar.
+**1. Check rebase before detached HEAD.** In the middle of a rebase conflict `git status`
+reports `(detached)` *and* `rebase-merge` at the same time. An engine that checks detached
+first tells a mid-rebase user something entirely wrong. Correct order: operation in
+progress → conflict → error text → failed command → state.
+`test_rebase_checked_before_detached` catches anyone breaking that order.
 
-**2. Hatanın ilk satırını okumak yetmez.** Merge çakışmasında git'in ilk çıktı satırı
-`Auto-merging a.txt`; gerçek hata aşağıdadır. `rules.hata_satirlari()` tüm satırları
-`CONFLICT`, `error:`, `fatal:`, `! [rejected]` için tarar.
+**2. Reading the first line of the error is not enough.** In a merge conflict git's first
+output line is `Auto-merging a.txt`; the real error is further down. `rules.error_lines()`
+scans every line for `CONFLICT`, `error:`, `fatal:`, `! [rejected]`.
 
-**3. "Upstream yok" tek hata değil, iki ayrı durum.** Remote hiç tanımlı değilse git
-`fatal: No configured push destination.` verir (senaryo 5); remote var ama branch'in
-upstream'i yoksa farklı mesaj ve farklı çözüm (senaryo 6, `git push -u origin <branch>`).
+**3. "No upstream" is not one error but two states.** With no remote configured git says
+`fatal: No configured push destination.` (scenario 5); with a remote but no tracking
+branch it is a different message and a different fix (scenario 6,
+`git push -u origin <branch>`).
 
-**4. Reddedilen push'tan sonra "geride kaldın" sinyali YOK.** Git reddedilen bir push'tan
-sonra uzak takip referansını güncellemiyor: `branch.ab` hâlâ `+1 -0` gösteriyor. Gerçek
-geri sayısı ancak `git fetch` sonrası `-1` oluyor ve `context.py` fetch yapamaz (salt-okunur).
-Bu yüzden senaryo 7 tek istisnadır: kararı durumdan değil hata metninden verir.
-`test_reddedilen_pushta_geri_sayisi_sifir_gorunuyor` bunu kayıt altında tutuyor.
+**4. After a rejected push there is NO "you are behind" signal.** Git does not update the
+remote-tracking ref after a rejected push: `branch.ab` still reads `+1 -0`. The real
+behind count only appears as `-1` after `git fetch`, and `context.py` cannot fetch
+(read-only). Scenario 7 is therefore the single exception: it decides from the error text,
+not from state. `test_behind_count_reads_zero_after_rejected_push` keeps that on the
+record.
 
-**5. `git check-ignore` sahnelenmiş yolda `--no-index` olmadan işe yaramaz.** Varsayılan
-olarak check-ignore index'e bakar ve index'te olan bir yolu, kural eşleşse bile "ignore
-edilmiyor" sayar. Senaryo 9 ve 10 tam olarak sahnelenmiş yolları sorguluyor; bu bayrak
-olmadan sonuç her zaman boş çıkar ve "`.gitignore` kuralı var ama dosya yine de
-sahnelenmiş" durumu hiç görülmez.
+**5. `git check-ignore` is useless on a staged path without `--no-index`.** By default
+check-ignore consults the index and reports a path that is in it as "not ignored" even
+when a rule matches. Scenarios 9 and 10 query exactly the staged paths; without the flag
+the answer is always empty and the "a `.gitignore` rule exists but the file was staged
+anyway" case is never seen.
 
-**6. Hata işaretçisi listesi bir kapı.** `rules.hata_satirlari()` yalnızca
-`HATA_ISARETCILERI` içindeki bir parçayı taşıyan satırları geçirir; geçmeyen satırı
-`esle()` hiç görmez. Korumalı branch reddinin satırı `! [remote rejected]`, ve bu ne
-`"! [rejected]"` ne de `"[rejected]"` işaretçisine uyuyor — araya `remote ` giriyor. Kural
-doğru yazılmış olmasına rağmen senaryo 8 sessizce hiç eşleşmedi. Kural: **işaretçiler en
-gevşek parça olmalı (`rejected`), senaryo desenleri dar.**
-`test_metin_tabanli_fixturelerin_satirlari_kapiyi_geciyor` bu sınıf hatayı yakalar.
+**6. The error-marker list is a gate.** `rules.error_lines()` only lets through lines
+carrying one of `ERROR_MARKERS`; `match()` never sees the rest. The protected-branch
+rejection line is `! [remote rejected]`, which matches neither `"! [rejected]"` nor
+`"[rejected]"` — `remote ` sits in between. The rule was correct and the pattern was
+correct, and scenario 8 still matched nothing, twice. The rule: **markers must be the
+loosest fragment (`rejected`), scenario patterns stay narrow.**
+`test_text_driven_fixtures_pass_the_marker_gate` catches this class of bug.
 
-**7. Erişilemeyen commit'i bulmanın salt-okunur yolu `rev-list --no-walk`.**
-`git fsck --lost-found` `.git/lost-found` dizinini yazar, yani depoyu değiştirir.
-`git rev-list --no-walk <shalar> --not --all` tek çağrıda, hiçbir şey yazmadan,
-sınır koymadan aynı cevabı verir: listelenen commit'lerden hiçbir ref'ten
-erişilemeyenler. `commit --amend` de eski commit'i erişilemez bırakır, ama bu kasıtlı
-bir işlemdir — reflog'da bir üstteki girdi `commit (amend)` ise atlanıyor
-(`neg_amend` fixture'ı bunu doğruluyor).
+**7. The read-only way to find an unreachable commit is `rev-list --no-walk`.**
+`git fsck --lost-found` writes a `.git/lost-found` directory, so it modifies the repo.
+`git rev-list --no-walk <shas> --not --all` gives the same answer in one call, writing
+nothing and needing no cap: of the listed commits, those no ref can reach.
+`commit --amend` also leaves the old commit unreachable, but that is deliberate — when the
+newer reflog entry is `commit (amend)` the commit is skipped (the `neg_amend` fixture
+confirms it).
 
-**8. Shell sarmalayıcısı hata metnini kaydedemiyor, çünkü metin zaten ekranda.**
-İlk sürüm yalnızca çıkış kodunu kaydediyordu; sonuç, metinden karar verilen beş
-senaryonun (5, 6, 7, 8, 11) sarmalayıcı üzerinden **hiç** eşleşmemesiydi. Kullanıcı
-ekranda `fatal: No configured push destination.` görüyor, gitwhy "eşleşen senaryo yok"
-diyordu. Çözüm stderr'i boruya almak değil — o git'in ilerleme çubuklarını susturur —
-**başarısız komutu kurala girdi vermek** oldu: `git push` + remote yok → senaryo 5,
-`git push` + remote var ama upstream yok → senaryo 6, `git checkout` + kaydedilmemiş
-dosya → senaryo 11. Takas yok, kapsam 7/12'den 10/12'ye çıktı. Komut kaydı yalnızca aynı
-depodan ve son 10 dakikadan kabul ediliyor; bayat bir kayıt bugünkü komutun cevabı
-sanılmasın diye.
+**8. The shell wrapper cannot record the error text, because the text is already on
+screen.** The first version recorded only the exit code, and the result was that the five
+text-driven scenarios (5, 6, 7, 8, 11) matched **nothing** through the wrapper. The user
+saw `fatal: No configured push destination.` on screen while gitwhy said "no matching
+scenario". The fix was not to pipe stderr — that silences git's progress bars — but to
+**feed the failed command to the rules**: `git push` + no remote → scenario 5, `git push`
++ remote but no upstream → scenario 6, `git checkout` + an unstaged file → scenario 11. No
+trade-off, and coverage went from 7/12 to 10/12. A recorded command is accepted only from
+the same repository and the last 10 minutes, so a stale record is never mistaken for the
+answer to today's command.
 
-## Demo kaydını yeniden üretmek
+## Reproducing the demo recording
 
-GIF ve ekran görüntüleri depoda duruyor; değiştirmek istersen iki yol var.
+The GIF and the images live in the repository; there are two ways to change them.
 
-**Windows dahil her yerde — kayıt programı (önerilen).** Adımlar
-[tools/demo.py](tools/demo.py) içindeki `ADIMLAR` listesinde; beklemeleri oradan
-ayarla.
+**Everywhere, Windows included — the recording program (recommended).** The steps are in
+the `STEPS` list in [tools/demo.py](tools/demo.py); adjust the holds there.
 
 ```bash
 pip install pillow
 python tools/demo.py              # docs/demo.gif + docs/demo.cast
-python tools/doctor_goruntu.py    # docs/doctor.svg + docs/doctor.png
+python tools/doctor_image.py      # docs/doctor.svg + docs/doctor.png
 ```
 
-Araç toplam süreyi yazdırır ve 20–30 saniye dışına çıkarsa uyarır. `--sadece-cast`
-Pillow olmadan yalnızca asciicast üretir.
+The tool prints the total length and warns if it leaves the 20–30 second window.
+`--cast-only` produces just the asciicast, with no Pillow needed.
 
-**Linux / macOS / WSL — gerçek terminal kaydı.** `asciinema`'nın Windows sürümü yok,
-bu yüzden bu yol yalnızca orada çalışır:
+**Linux / macOS / WSL — a real terminal recording.** asciinema has no Windows build, so
+this path only works there:
 
 ```bash
 asciinema rec docs/demo.cast --cols 96 --rows 36 --overwrite \
-    --idle-time-limit 2 -c "bash tools/demo_akis.sh"
+    --idle-time-limit 2 -c "bash tools/demo_flow.sh"
 agg --font-size 15 --theme github-dark docs/demo.cast docs/demo.gif
 ```
 
-[tools/demo_akis.sh](tools/demo_akis.sh) akışı kendisi yazdığı için kaydı gözetimsiz
-alabilirsin; yazım hatası ve yeniden çekim yok. İkisi de geçici bir dizinde çalışır,
-senin deponu değiştirmez.
+[tools/demo_flow.sh](tools/demo_flow.sh) types the flow itself, so the recording can be
+taken unattended; no typos, no retakes. Both paths work in a temporary directory and leave
+your own repository alone.
 
-Kaydedilen akış, 29,7 saniye:
+The recorded flow, 29.7 seconds:
 
-| Saniye | Ne görünüyor |
+| Seconds | What you see |
 |---|---|
-| 0–4 | `git rebase main` → `CONFLICT` ve `error: could not apply` |
-| 4–14 | `gitwhy` → ne olduğu, deponun durumu, üç seçenek ve yıkıcı olanın uyarısı |
-| 14–17 | çakışma çözülür, `git add a.txt` |
-| 17–21 | `git rebase --continue` → `Successfully rebased and updated refs/heads/ozellik.` |
-| 21–30 | `gitwhy doctor` → temiz depo |
+| 0–4 | `git rebase main` → `CONFLICT` and `error: could not apply` |
+| 4–14 | `gitwhy` → what happened, the repo's state, three options, and the warning on the destructive one |
+| 14–17 | the conflict is resolved, `git add a.txt` |
+| 17–21 | `git rebase --continue` → `Successfully rebased and updated refs/heads/feature.` |
+| 21–30 | `gitwhy doctor` → a clean repository |
 
-## Lisans
+## License
 
 MIT

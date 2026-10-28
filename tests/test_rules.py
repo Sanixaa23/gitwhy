@@ -1,346 +1,349 @@
-"""Olculmus senaryo dogrulugu: her senaryo gercek bir depoda kurulur.
+"""Measured scenario accuracy: every scenario is built in a real repository.
 
-Dogrudan da kosar (pytest gerekmez):
+Also runs standalone (no pytest needed):
     python tests/test_rules.py
-Bu bicimde karisiklik matrisini yazdirir; README'deki tablo buradan gelir.
+In that form it prints the confusion matrix; the README table comes from here.
 """
 from __future__ import annotations
 
 import os
 import sys
 
-KOK = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, os.path.join(KOK, "src"))
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(ROOT, "src"))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import fixtures  # noqa: E402
 from gitwhy import context, explain, rules  # noqa: E402
 
 
-def _tahmin(fx) -> str:
-    ctx = context.topla(fx.depo)
-    return rules.esle(ctx, fx.hata_metni) or "(eslesme yok)"
+def _predict(fx) -> str:
+    ctx = context.collect(fx.repo)
+    return rules.match(ctx, fx.error_text) or "(no match)"
 
 
-def test_her_senaryo_dogru_eslesiyor():
-    """Fixture ile kurulan her durum kendi senaryosuna eslesmeli."""
+def test_every_scenario_matches():
+    """Every state built by a fixture must match its own scenario."""
     try:
-        for fx in fixtures.hepsi():
-            assert _tahmin(fx) == fx.senaryo_id, (
-                "%s yerine %s esleşti" % (fx.senaryo_id, _tahmin(fx))
+        for fx in fixtures.all_fixtures():
+            assert _predict(fx) == fx.scenario_id, (
+                "got %s instead of %s" % (_predict(fx), fx.scenario_id)
             )
     finally:
-        fixtures.temizle()
+        fixtures.cleanup()
 
 
-def test_rebase_detached_oncesinde_kontrol_ediliyor():
-    """Dogrulanmis siralama kurali: rebase ortasindaki depo detached da gorunur.
+def test_rebase_checked_before_detached():
+    """The verified ordering rule: a mid-rebase repo also looks detached.
 
-    Bu test kuralin yanlislikla degistirilmesini yakalar.
+    This test catches anyone accidentally reversing that order.
     """
     try:
-        fx = fixtures.kur("03_rebase_ortasi")
-        ctx = context.topla(fx.depo)
-        assert ctx.detached, "rebase ortasindaki depo detached gorunmuyor, fixture bozulmus"
-        assert "rebase-merge" in ctx.surmekte or "rebase-apply" in ctx.surmekte
-        assert rules.esle(ctx, fx.hata_metni) == "03_rebase_ortasi"
+        fx = fixtures.build("03_rebase_in_progress")
+        ctx = context.collect(fx.repo)
+        assert ctx.detached, "mid-rebase repo does not look detached; fixture broken"
+        assert "rebase-merge" in ctx.in_progress or "rebase-apply" in ctx.in_progress
+        assert rules.match(ctx, fx.error_text) == "03_rebase_in_progress"
     finally:
-        fixtures.temizle()
+        fixtures.cleanup()
 
 
-def test_hata_metni_tum_satirlar_taraniyor():
-    """Merge cakismasinda ilk satir "Auto-merging"; CONFLICT asagida."""
+def test_all_error_lines_are_scanned():
+    """In a merge conflict the first line is "Auto-merging"; CONFLICT is below."""
     try:
-        fx = fixtures.kur("02_merge_cakismasi")
-        assert "CONFLICT" in fx.hata_metni
-        satirlar = rules.hata_satirlari(fx.hata_metni)
-        assert satirlar, "karar satiri bulunamadi"
-        assert any("CONFLICT" in s for s in satirlar)
+        fx = fixtures.build("02_merge_conflict")
+        assert "CONFLICT" in fx.error_text
+        lines = rules.error_lines(fx.error_text)
+        assert lines, "no decision line found"
+        assert any("CONFLICT" in line for line in lines)
     finally:
-        fixtures.temizle()
+        fixtures.cleanup()
 
 
-def test_env_example_yanlis_pozitif_vermiyor():
-    """`.env.example` commit edilmek uzere var; sir sayilmamali."""
+def test_env_example_is_not_a_false_positive():
+    """`.env.example` exists in order to be committed; it is not a secret."""
     try:
-        fx = fixtures.kur("10_sir_sahnelendi")
-        ctx = context.topla(fx.depo)
-        assert ".env" in ctx.sahnelenen and ".env.example" in ctx.sahnelenen
-        assert rules.sir_yollari(ctx) == [".env"]
+        fx = fixtures.build("10_secret_staged")
+        ctx = context.collect(fx.repo)
+        assert ".env" in ctx.staged and ".env.example" in ctx.staged
+        assert rules.secret_paths(ctx) == [".env"]
     finally:
-        fixtures.temizle()
+        fixtures.cleanup()
 
 
-def test_bagimlilik_dosya_degil_dizin_donduruyor():
-    """node_modules icindeki 2 dosya icin tek bir dizin adi donmeli."""
+def test_dependency_reported_as_directory_not_files():
+    """Two files inside node_modules must yield a single directory name."""
     try:
-        fx = fixtures.kur("09_bagimlilik_sahnelendi")
-        ctx = context.topla(fx.depo)
-        assert len(ctx.sahnelenen) == 2
-        assert rules.bagimlilik_yollari(ctx) == ["node_modules"]
+        fx = fixtures.build("09_dependency_staged")
+        ctx = context.collect(fx.repo)
+        assert len(ctx.staged) == 2
+        assert rules.dependency_paths(ctx) == ["node_modules"]
     finally:
-        fixtures.temizle()
+        fixtures.cleanup()
 
 
-def test_reddedilen_pushta_geri_sayisi_sifir_gorunuyor():
-    """Dogrulanmis bulgu: reddedilen push remote-tracking ref'i guncellemez.
+def test_behind_count_reads_zero_after_rejected_push():
+    """Verified finding: a rejected push does not update the remote-tracking ref.
 
-    Bu yuzden senaryo 7 karari `branch.ab` degil hata metni uzerinden verilir.
-    Test, birinin ileride ctx.geri'ye dayanan bir kural yazmasini engeller.
+    That is why scenario 7 decides from the error text and not `branch.ab`.
+    The test stops anyone later writing a rule that leans on ctx.behind.
     """
     try:
-        fx = fixtures.kur("07_push_reddedildi")
-        ctx = context.topla(fx.depo)
-        assert "! [rejected]" in fx.hata_metni
-        assert ctx.geri == 0, "git davranisi degismis, kural yeniden gozden gecirilmeli"
-        assert rules.esle(ctx, fx.hata_metni) == "07_push_reddedildi"
-        # Hata metni olmadan bu durum tespit EDILEMEZ; bilerek boyle.
-        assert rules.esle(ctx, "") != "07_push_reddedildi"
+        fx = fixtures.build("07_push_rejected")
+        ctx = context.collect(fx.repo)
+        assert "! [rejected]" in fx.error_text
+        assert ctx.behind == 0, "git's behaviour changed; revisit the rule"
+        assert rules.match(ctx, fx.error_text) == "07_push_rejected"
+        # Without the error text this state is UNDETECTABLE; that is deliberate.
+        assert rules.match(ctx, "") != "07_push_rejected"
     finally:
-        fixtures.temizle()
+        fixtures.cleanup()
 
 
-def test_sahnelenmis_sir_ignore_kontrolu_no_index_kullaniyor():
-    """check-ignore --no-index olmadan sahnelenmis yol hep "ignore edilmiyor" cikar."""
+def test_staged_ignore_check_uses_no_index():
+    """Without --no-index a staged path always reads as "not ignored"."""
     try:
-        fx = fixtures.kur("10_sir_sahnelendi")
-        with open(os.path.join(fx.depo, ".gitignore"), "w", encoding="utf-8") as f:
+        fx = fixtures.build("10_secret_staged")
+        with open(os.path.join(fx.repo, ".gitignore"), "w", encoding="utf-8") as f:
             f.write(".env\n")
-        ctx = context.topla(fx.depo)
-        assert ".env" in ctx.ignore_edilen, (
-            "sahnelenmis .env icin kural eslesmesi gorulemedi; --no-index dusmus olabilir"
+        ctx = context.collect(fx.repo)
+        assert ".env" in ctx.ignored_staged, (
+            "no rule match seen for a staged .env; --no-index may have been dropped"
         )
     finally:
-        fixtures.temizle()
+        fixtures.cleanup()
 
 
-def test_negatif_kontroller_hicbir_senaryoya_eslesmiyor():
-    """Sorunsuz depo, amend sonrasi ve main'de gonderilmemis commit:
-    uc durumun hicbiri bir senaryo degil. Eslesirse yanlis pozitif var."""
+def test_negative_controls_match_nothing():
+    """A clean repo, a repo after amend, and main with an unpushed commit:
+    none of the three is a scenario. A match here is a false positive."""
     try:
-        for v in ("neg_temiz", "neg_amend", "neg_main_ileride"):
-            fx = fixtures.kur(v)
-            ctx = context.topla(fx.depo)
-            assert rules.esle(ctx, fx.hata_metni) is None, (
-                "%s yanlis pozitif verdi: %s" % (v, rules.esle(ctx, fx.hata_metni))
+        for variant in ("neg_clean", "neg_amend", "neg_main_ahead"):
+            fx = fixtures.build(variant)
+            ctx = context.collect(fx.repo)
+            assert rules.match(ctx, fx.error_text) is None, (
+                "%s gave a false positive: %s" % (variant, rules.match(ctx, fx.error_text))
             )
     finally:
-        fixtures.temizle()
+        fixtures.cleanup()
 
 
-def test_amend_kayip_commit_sayilmiyor():
-    """`commit --amend` eski commit'i erisilemez birakir; kayip degil."""
+def test_amend_is_not_a_lost_commit():
+    """`commit --amend` leaves the old commit unreachable; that is not a loss."""
     try:
-        fx = fixtures.kur("neg_amend")
-        assert context.kayip_commitler(fx.depo) == []
-        fx2 = fixtures.kur("12_reset_hard")
-        assert len(context.kayip_commitler(fx2.depo)) == 1
+        fx = fixtures.build("neg_amend")
+        assert context.lost_commits(fx.repo) == []
+        fx2 = fixtures.build("12_reset_hard")
+        assert len(context.lost_commits(fx2.repo)) == 1
     finally:
-        fixtures.temizle()
+        fixtures.cleanup()
 
 
-def test_cherry_pick_ve_revert_ayni_senaryo_farkli_komut():
-    """Iki varyant ayni senaryoya duser ama onerilen komut farkli olmali."""
+def test_cherry_pick_and_revert_share_a_scenario_but_not_a_command():
+    """Both variants land on one scenario, but the suggested command differs."""
     try:
-        for varyant, komut in (("04_cherry_pick", "cherry-pick"), ("04_revert", "revert")):
-            fx = fixtures.kur(varyant)
-            ctx = context.topla(fx.depo)
-            assert rules.esle(ctx, fx.hata_metni) == "04_cherry_pick_ortasi"
-            metin = explain.anlat("04_cherry_pick_ortasi", ctx)
-            assert "git %s --continue" % komut in metin, (
-                "%s icin yanlis komut onerildi" % varyant
+        for variant, command in (("04_cherry_pick", "cherry-pick"),
+                                 ("04_revert", "revert")):
+            fx = fixtures.build(variant)
+            ctx = context.collect(fx.repo)
+            assert rules.match(ctx, fx.error_text) == "04_cherry_pick_in_progress"
+            text = explain.explain("04_cherry_pick_in_progress", ctx)
+            assert "git %s --continue" % command in text, (
+                "wrong command suggested for %s" % variant
             )
     finally:
-        fixtures.temizle()
+        fixtures.cleanup()
 
 
-def test_korumali_branch_reddi_push_reddinden_ayirt_ediliyor():
-    """08 ve 07 ikisi de "failed to push some refs" iceriyor; karismamali."""
+def test_protected_branch_differs_from_push_rejection():
+    """Scenarios 8 and 7 both carry "failed to push some refs"; keep them apart."""
     try:
-        korumali = fixtures.kur("08_korumali_branch")
-        reddedilen = fixtures.kur("07_push_reddedildi")
-        assert "[remote rejected]" in korumali.hata_metni
-        assert "[remote rejected]" not in reddedilen.hata_metni
-        assert rules.esle(context.topla(korumali.depo), korumali.hata_metni) == "08_yanlis_branch"
-        assert rules.esle(context.topla(reddedilen.depo), reddedilen.hata_metni) == "07_push_reddedildi"
+        protected = fixtures.build("08_protected_branch")
+        rejected = fixtures.build("07_push_rejected")
+        assert "[remote rejected]" in protected.error_text
+        assert "[remote rejected]" not in rejected.error_text
+        assert rules.match(context.collect(protected.repo),
+                           protected.error_text) == "08_wrong_branch"
+        assert rules.match(context.collect(rejected.repo),
+                           rejected.error_text) == "07_push_rejected"
     finally:
-        fixtures.temizle()
+        fixtures.cleanup()
 
 
-def test_senaryo_11_checkout_ve_merge_varyantlari():
+def test_scenario_11_checkout_and_merge_variants():
     try:
-        for v in ("11_checkout_engellendi", "11_merge_engellendi"):
-            fx = fixtures.kur(v)
-            ctx = context.topla(fx.depo)
-            assert ctx.kaydedilmemis == ["a.txt"], "%s: %s" % (v, ctx.kaydedilmemis)
-            assert rules.esle(ctx, fx.hata_metni) == "11_yerel_degisiklik_engelliyor"
+        for variant in ("11_checkout_blocked", "11_merge_blocked"):
+            fx = fixtures.build(variant)
+            ctx = context.collect(fx.repo)
+            assert ctx.unstaged == ["a.txt"], "%s: %s" % (variant, ctx.unstaged)
+            assert rules.match(ctx, fx.error_text) == "11_local_changes_block"
     finally:
-        fixtures.temizle()
+        fixtures.cleanup()
 
 
-def test_tum_sablonlarda_dolmayan_yer_tutucu_yok():
-    """Her senaryo kendi fixture'inda render edilince {{...}} kalmamali."""
-    import re
-    eksik = {}
-    try:
-        for fx in fixtures.hepsi():
-            senaryo = _tahmin(fx)
-            if senaryo == "(eslesme yok)":
-                continue
-            metin = explain.anlat(senaryo, context.topla(fx.depo))
-            kalan = re.findall(r"\{\{\w+\}\}", metin)
-            if kalan:
-                eksik[senaryo] = kalan
-    finally:
-        fixtures.temizle()
-    assert not eksik, "dolmayan yer tutucu: %s" % eksik
+def test_text_driven_fixtures_pass_the_marker_gate():
+    """ERROR_MARKERS is a gate: a line that misses it never reaches match().
 
-
-def test_metin_tabanli_fixturelerin_satirlari_kapiyi_geciyor():
-    """HATA_ISARETCILERI bir kapi: uymayan satir esle()'ye hic ulasmaz.
-
-    Metinden karar verilen her senaryonun fixture'inda en az bir karar
-    satiri kalmali. Bu testin yoklugunda senaryo 8 sessizce eslesmemisti.
+    Every text-driven scenario's fixture must leave at least one decision
+    line. Without this test, scenario 8 silently matched nothing.
     """
     try:
-        for v in ("05_remote_yok", "06_upstream_yok", "07_push_reddedildi",
-                  "08_korumali_branch", "11_checkout_engellendi",
-                  "11_merge_engellendi"):
-            fx = fixtures.kur(v)
-            assert rules.hata_satirlari(fx.hata_metni), (
-                "%s: hata metni isaretci kapisindan gecmiyor" % v
+        for variant in ("05_no_remote", "06_no_upstream", "07_push_rejected",
+                        "08_protected_branch", "11_checkout_blocked",
+                        "11_merge_blocked"):
+            fx = fixtures.build(variant)
+            assert rules.error_lines(fx.error_text), (
+                "%s: error text does not pass the marker gate" % variant
             )
     finally:
-        fixtures.temizle()
+        fixtures.cleanup()
 
 
-def test_git_alt_komut_ayristirma():
-    assert rules.git_alt_komut("git push") == "push"
-    assert rules.git_alt_komut("git -c user.email=x push -u origin main") == "push"
-    assert rules.git_alt_komut("git -C /tmp/depo status --short") == "status"
-    assert rules.git_alt_komut("git --no-pager log") == "log"
-    assert rules.git_alt_komut("npm install") is None
-    assert rules.git_alt_komut("git") is None
-    assert rules.git_alt_komut("") is None
-    assert rules.git_alt_komut(None) is None
+def test_git_subcommand_parsing():
+    assert rules.git_subcommand("git push") == "push"
+    assert rules.git_subcommand("git -c user.email=x push -u origin main") == "push"
+    assert rules.git_subcommand("git -C /tmp/repo status --short") == "status"
+    assert rules.git_subcommand("git --no-pager log") == "log"
+    assert rules.git_subcommand("npm install") is None
+    assert rules.git_subcommand("git") is None
+    assert rules.git_subcommand("") is None
+    assert rules.git_subcommand(None) is None
 
 
-def test_sarmalayici_metinsiz_komuttan_buluyor():
-    """Sarmalayici hatayi ekranda biraktigi icin metin yok, komut var.
+def test_wrapper_finds_scenarios_without_error_text():
+    """The wrapper leaves the error on screen, so there is no text, only a command.
 
-    Bu blok olmadan 5, 6 ve 11 sarmalayici uzerinden hic eslesmiyordu;
-    gercek bir depoda olculdu (bkz. tools/sarmalayici_test.sh).
+    Without this block scenarios 5, 6 and 11 never matched through the
+    wrapper; measured in a real repository (see tools/wrapper_test.sh).
     """
     try:
-        bekleneler = (
-            ("05_remote_yok", "git push", "05_remote_yok"),
-            ("06_upstream_yok", "git push", "06_upstream_yok"),
-            ("11_checkout_engellendi", "git checkout ozellik",
-             "11_yerel_degisiklik_engelliyor"),
+        expectations = (
+            ("05_no_remote", "git push", "05_no_remote"),
+            ("06_no_upstream", "git push", "06_no_upstream"),
+            ("11_checkout_blocked", "git checkout feature",
+             "11_local_changes_block"),
         )
-        for varyant, komut, beklenen in bekleneler:
-            fx = fixtures.kur(varyant)
-            ctx = context.topla(fx.depo)
-            assert rules.esle(ctx, "", komut) == beklenen, (
-                "%s: metinsiz eslesme basarisiz" % varyant
+        for variant, command, expected in expectations:
+            fx = fixtures.build(variant)
+            ctx = context.collect(fx.repo)
+            assert rules.match(ctx, "", command) == expected, (
+                "%s: textless match failed" % variant
             )
     finally:
-        fixtures.temizle()
+        fixtures.cleanup()
 
 
-def test_komut_tek_basina_yanlis_pozitif_vermiyor():
-    """Remote ve upstream varken basarisiz bir push komut kuralina dusmemeli."""
+def test_command_alone_gives_no_false_positive():
+    """A failed push with a remote and an upstream must not hit a command rule."""
     try:
-        fx = fixtures.kur("neg_main_ileride")
-        ctx = context.topla(fx.depo)
-        assert ctx.remote_var and ctx.upstream
-        assert rules.esle(ctx, "", "git push") is None
-        # Temiz depoda checkout basarisizligi da uydurulmamali.
-        fx2 = fixtures.kur("neg_temiz")
-        ctx2 = context.topla(fx2.depo)
-        assert rules.esle(ctx2, "", "git checkout main") is None
+        fx = fixtures.build("neg_main_ahead")
+        ctx = context.collect(fx.repo)
+        assert ctx.has_remote and ctx.upstream
+        assert rules.match(ctx, "", "git push") is None
+        # A failed checkout in a clean repo must not be invented either.
+        fx2 = fixtures.build("neg_clean")
+        ctx2 = context.collect(fx2.repo)
+        assert rules.match(ctx2, "", "git checkout main") is None
     finally:
-        fixtures.temizle()
+        fixtures.cleanup()
 
 
-def test_kayit_gecerliligi():
-    """Bayat ya da baska depoya ait kayit komut kurallarini tetiklememeli."""
+def test_record_validity():
+    """A stale record, or one from another repository, must not fire a rule."""
     import time
     from gitwhy import capture
     try:
-        fx = fixtures.kur("05_remote_yok")
-        taze = {"depo": fx.depo, "zaman": time.time(), "komut": "git push"}
-        bayat = {"depo": fx.depo, "zaman": time.time() - 3600, "komut": "git push"}
-        baska = {"depo": os.path.join(fx.depo, "baska"), "zaman": time.time(),
-                 "komut": "git push"}
-        assert capture.gecerli(taze, fx.depo)
-        assert not capture.gecerli(bayat, fx.depo)
-        assert not capture.gecerli(baska, fx.depo)
-        assert not capture.gecerli(None, fx.depo)
+        fx = fixtures.build("05_no_remote")
+        fresh = {"repo": fx.repo, "time": time.time(), "command": "git push"}
+        stale = {"repo": fx.repo, "time": time.time() - 3600, "command": "git push"}
+        elsewhere = {"repo": os.path.join(fx.repo, "other"), "time": time.time(),
+                     "command": "git push"}
+        assert capture.is_valid(fresh, fx.repo)
+        assert not capture.is_valid(stale, fx.repo)
+        assert not capture.is_valid(elsewhere, fx.repo)
+        assert not capture.is_valid(None, fx.repo)
     finally:
-        fixtures.temizle()
+        fixtures.cleanup()
 
 
-def test_uygulanan_senaryolarin_sablonu_var():
-    eksik = [s for s in rules.UYGULANAN if s not in explain.sablonlar()]
-    assert not eksik, "sablonu olmayan senaryo: %s" % eksik
+def test_implemented_scenarios_have_templates():
+    missing = [s for s in rules.IMPLEMENTED if s not in explain.templates()]
+    assert not missing, "scenario without a template: %s" % missing
 
 
-def test_bos_hata_metni_cokmuyor():
+def test_no_unfilled_placeholders():
+    """Rendered against its own fixture, no template may leave {{...}} behind."""
+    import re
+    leftovers = {}
     try:
-        fx = fixtures.kur("01_detached_head")
-        ctx = context.topla(fx.depo)
-        assert rules.esle(ctx, "") == "01_detached_head"
-        assert rules.esle(ctx, None) == "01_detached_head"
+        for fx in fixtures.all_fixtures():
+            scenario = _predict(fx)
+            if scenario == "(no match)":
+                continue
+            text = explain.explain(scenario, context.collect(fx.repo))
+            found = re.findall(r"\{\{\w+\}\}", text)
+            if found:
+                leftovers[scenario] = found
     finally:
-        fixtures.temizle()
+        fixtures.cleanup()
+    assert not leftovers, "unfilled placeholders: %s" % leftovers
 
 
-def test_git_deposu_olmayan_dizin():
+def test_empty_error_text_does_not_crash():
+    try:
+        fx = fixtures.build("01_detached_head")
+        ctx = context.collect(fx.repo)
+        assert rules.match(ctx, "") == "01_detached_head"
+        assert rules.match(ctx, None) == "01_detached_head"
+    finally:
+        fixtures.cleanup()
+
+
+def test_directory_that_is_not_a_repository():
     import tempfile
-    d = tempfile.mkdtemp(prefix="gitwhy_bos_")
+    d = tempfile.mkdtemp(prefix="gitwhy_empty_")
     try:
-        ctx = context.topla(d)
-        assert not ctx.gecerli_depo
-        assert rules.esle(ctx, "fatal: not a git repository") is None
+        ctx = context.collect(d)
+        assert not ctx.is_repo
+        assert rules.match(ctx, "fatal: not a git repository") is None
     finally:
         import shutil
         shutil.rmtree(d, ignore_errors=True)
 
 
-def _kisa(senaryo_id: str) -> str:
-    """Matris basligi icin kisa ad. "yok" satiri negatif kontrolleri tutar."""
-    return "yok" if senaryo_id == "(eslesme yok)" else senaryo_id.split("_")[0]
+def _short(scenario_id: str) -> str:
+    """Short matrix header. The "none" row holds the negative controls."""
+    return "none" if scenario_id == "(no match)" else scenario_id.split("_")[0]
 
 
-def karisiklik_matrisi():
-    """Karisiklik matrisi: gercek satir, tahmin kolon.
+def confusion_matrix():
+    """Confusion matrix: truth down the rows, prediction across the columns.
 
-    Son satir/kolon negatif kontroller: sorunsuz depo, amend sonrasi,
-    main'de gonderilmemis commit. Oradaki kosegen dogru yanlis-pozitif
-    vermemek demek.
+    The last row/column are the negative controls: a clean repository, a
+    repository after amend, and main with an unpushed commit. A correct
+    diagonal there means "produced no false positive".
     """
-    senaryolar = list(fixtures.SENARYOLAR)
-    matris = {g: {t: 0 for t in senaryolar} for g in senaryolar}
+    scenarios = list(fixtures.SCENARIOS)
+    matrix = {t: {p: 0 for p in scenarios} for t in scenarios}
     try:
-        for fx in fixtures.hepsi():
-            matris[fx.senaryo_id][_tahmin(fx)] += 1
+        for fx in fixtures.all_fixtures():
+            matrix[fx.scenario_id][_predict(fx)] += 1
     finally:
-        fixtures.temizle()
+        fixtures.cleanup()
 
-    basliklar = [_kisa(k) for k in senaryolar]
-    print("gercek \\ tahmin   " + " ".join("%4s" % b for b in basliklar))
-    dogru = toplam = 0
-    for g in senaryolar:
-        satir = " ".join("%4d" % matris[g][t] for t in senaryolar)
-        print("%-17s %s" % (_kisa(g), satir))
-        dogru += matris[g][g]
-        toplam += sum(matris[g].values())
-    print("\n%d senaryo, %d fixture, %d/%d dogru eslesme (%%%d)" % (
-        len(rules.UYGULANAN), len(fixtures.VARYANTLAR),
-        dogru, toplam, round(100 * dogru / toplam)))
-    return matris
+    headers = [_short(s) for s in scenarios]
+    print("truth \\ prediction " + " ".join("%4s" % h for h in headers))
+    correct = total = 0
+    for t in scenarios:
+        row = " ".join("%4d" % matrix[t][p] for p in scenarios)
+        print("%-18s %s" % (_short(t), row))
+        correct += matrix[t][t]
+        total += sum(matrix[t].values())
+    print("\n%d scenarios, %d fixtures, %d/%d correct (%d%%)" % (
+        len(rules.IMPLEMENTED), len(fixtures.VARIANTS),
+        correct, total, round(100 * correct / total)))
+    return matrix
 
 
 if __name__ == "__main__":
-    karisiklik_matrisi()
+    confusion_matrix()

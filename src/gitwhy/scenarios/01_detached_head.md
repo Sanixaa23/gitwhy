@@ -1,26 +1,26 @@
-## Ne oldu
+## What happened
 
-Hiçbir branch üzerinde değilsin. Git buna "detached HEAD" diyor: `{{oid_kisa}}` commit'ine
-doğrudan bakıyorsun. Buradan atacağın commit'ler hiçbir branch'e bağlanmaz ve branch
-değiştirdiğin anda kolayca bulunamaz hale gelirler.
+You are not on any branch. Git calls this "detached HEAD": you are looking straight at
+commit `{{short_oid}}`. Commits you make from here belong to no branch, and once you
+switch away they are hard to find again.
 
-## Neredesin
+## Where you are
 
-- Depo: `{{depo}}`
-- HEAD: `{{oid_kisa}}` — bağlı olduğu branch yok
-- Son commit: {{son_mesaj}}
-- Sahnelenmiş dosya: {{sahnelenen_sayisi}}
+- Repository: `{{repo}}`
+- HEAD: `{{short_oid}}` — not attached to a branch
+- Last commit: {{last_subject}}
+- Staged files: {{staged_count}}
 
-## Ne yapmalısın
+## What to do
 
-Burada iş yaptıysan, önce ona bir branch ver:
+If you did work here, give it a branch first:
 
-    git switch -c kurtarma-{{oid_kisa}}
+    git switch -c rescue-{{short_oid}}
 
-Hiçbir şey yapmadıysan ve geldiğin yere dönmek istiyorsan:
+If you changed nothing and just want to go back:
 
     git switch -
 
-> UYARI: Kaydedilmemiş değişikliğin varsa `git switch -` komutunu git engeller. Bu engeli
-> `--discard-changes` ile aşmak, kaydedilmemiş tüm değişikliklerini KALICI olarak siler.
-> gitwhy bu komutu kendiliğinden çalıştırmaz; kararı sen ver.
+> WARNING: git blocks `git switch -` when you have uncommitted changes. Forcing past
+> that with `--discard-changes` deletes every uncommitted change PERMANENTLY. gitwhy
+> never runs this for you; the call is yours.

@@ -1,10 +1,10 @@
-"""Bozuk git depolarini program yoluyla kurar.
+"""Builds broken git repositories programmatically.
 
-Her senaryo icin gercek bir depo, gercek bir bozuk durum ve o durumu ureten
-komutun GERCEK hata metni. Olculmus senaryo dogrulugu buradan geliyor:
-senaryoyu elle anlatmiyoruz, kuruyoruz.
+For every scenario: a real repository, a real broken state, and the REAL error
+text of the command that produced it. Measured scenario accuracy comes from
+here — we do not describe a scenario, we build it.
 
-Hepsi tempfile icinde; `temizle()` hepsini siler.
+Everything lives under tempfile; `cleanup()` removes it all.
 """
 from __future__ import annotations
 
@@ -15,35 +15,35 @@ import tempfile
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Tuple
 
-# Kullanicinin global git ayarlari testi etkilemesin: var olmayan bir dosyaya
-# isaret ediyoruz. os.devnull Windows'ta ("nul") git tarafindan kabul edilmiyor.
-_AYAR_YOK = os.path.join(tempfile.gettempdir(), "gitwhy_ayar_yok")
+# Keep the user's global git config out of the tests: point at a file that
+# does not exist. os.devnull ("nul") is not accepted by git on Windows.
+_NO_CONFIG = os.path.join(tempfile.gettempdir(), "gitwhy_no_config")
 
-ORTAM = dict(
+ENV = dict(
     os.environ,
     GIT_AUTHOR_NAME="gitwhy test",
     GIT_AUTHOR_EMAIL="test@gitwhy.invalid",
     GIT_COMMITTER_NAME="gitwhy test",
     GIT_COMMITTER_EMAIL="test@gitwhy.invalid",
-    GIT_CONFIG_GLOBAL=_AYAR_YOK,
-    GIT_CONFIG_SYSTEM=_AYAR_YOK,
+    GIT_CONFIG_GLOBAL=_NO_CONFIG,
+    GIT_CONFIG_SYSTEM=_NO_CONFIG,
     LC_ALL="C",
     GIT_TERMINAL_PROMPT="0",
 )
 
-_KOKLER: List[str] = []
+_ROOTS: List[str] = []
 
 
 @dataclass
 class Fixture:
-    senaryo_id: str
-    depo: str
-    hata_metni: str     # komutun gercek ciktisi (stderr + stdout)
-    exit_kodu: int
+    scenario_id: str
+    repo: str
+    error_text: str     # the command's real output (stderr + stdout)
+    exit_code: int
 
 
-def g(depo: str, *arg: str) -> Tuple[str, str, int]:
-    p = subprocess.run(["git", "-C", depo, *arg], capture_output=True, env=ORTAM)
+def g(repo: str, *args: str) -> Tuple[str, str, int]:
+    p = subprocess.run(["git", "-C", repo, *args], capture_output=True, env=ENV)
     return (
         p.stdout.decode("utf-8", "replace"),
         p.stderr.decode("utf-8", "replace"),
@@ -51,301 +51,302 @@ def g(depo: str, *arg: str) -> Tuple[str, str, int]:
     )
 
 
-def _yaz(depo: str, ad: str, metin: str) -> None:
-    yol = os.path.join(depo, ad)
-    if os.path.dirname(ad):
-        os.makedirs(os.path.dirname(yol), exist_ok=True)
-    with open(yol, "w", encoding="utf-8", newline="\n") as f:
-        f.write(metin)
+def _write(repo: str, name: str, text: str) -> None:
+    path = os.path.join(repo, name)
+    if os.path.dirname(name):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
+        f.write(text)
 
 
-def _yeni_depo() -> str:
-    kok = tempfile.mkdtemp(prefix="gitwhy_fix_")
-    _KOKLER.append(kok)
-    depo = os.path.join(kok, "depo")
-    os.makedirs(depo)
-    g(depo, "init", "-q", "-b", "main")
-    g(depo, "config", "commit.gpgsign", "false")
-    _yaz(depo, "a.txt", "satir1\n")
-    g(depo, "add", "a.txt")
-    g(depo, "commit", "-qm", "ilk commit")
-    _yaz(depo, "a.txt", "satir1\nsatir2\n")
-    g(depo, "commit", "-qam", "ikinci commit")
-    return depo
+def _new_repo() -> str:
+    root = tempfile.mkdtemp(prefix="gitwhy_fix_")
+    _ROOTS.append(root)
+    repo = os.path.join(root, "repo")
+    os.makedirs(repo)
+    g(repo, "init", "-q", "-b", "main")
+    g(repo, "config", "commit.gpgsign", "false")
+    _write(repo, "a.txt", "line1\n")
+    g(repo, "add", "a.txt")
+    g(repo, "commit", "-qm", "first commit")
+    _write(repo, "a.txt", "line1\nline2\n")
+    g(repo, "commit", "-qam", "second commit")
+    return repo
 
 
-def _birlestir(out: str, err: str) -> str:
-    """git CONFLICT satirini stdout'a yaziyor; ikisini birlikte dondur."""
+def _combine(out: str, err: str) -> str:
+    """git writes the CONFLICT line to stdout; return both together."""
     return "\n".join(x for x in (err.strip(), out.strip()) if x)
 
 
-# --- senaryo kurucular -----------------------------------------------------
-
-def _kur_detached() -> Fixture:
-    depo = _yeni_depo()
-    sha, _, _ = g(depo, "rev-parse", "HEAD~1")
-    out, err, rc = g(depo, "checkout", "-q", sha.strip())
-    # Bu senaryoda komut basarili; kullanici hatayi sonradan fark eder.
-    return Fixture("01_detached_head", depo, _birlestir(out, err), rc)
-
-
-def _kur_merge_cakismasi() -> Fixture:
-    depo = _yeni_depo()
-    g(depo, "checkout", "-q", "-b", "ozellik")
-    _yaz(depo, "a.txt", "satir1\nOZELLIK\n")
-    g(depo, "commit", "-qam", "ozellik tarafi")
-    g(depo, "checkout", "-q", "main")
-    _yaz(depo, "a.txt", "satir1\nMAIN\n")
-    g(depo, "commit", "-qam", "main tarafi")
-    out, err, rc = g(depo, "merge", "ozellik")
-    return Fixture("02_merge_cakismasi", depo, _birlestir(out, err), rc)
-
-
-def _kur_rebase_ortasi() -> Fixture:
-    depo = _yeni_depo()
-    g(depo, "checkout", "-q", "-b", "ozellik", "HEAD~1")
-    _yaz(depo, "a.txt", "satir1\nOZELLIK\n")
-    g(depo, "commit", "-qam", "ozellik tarafi")
-    out, err, rc = g(depo, "rebase", "main")
-    return Fixture("03_rebase_ortasi", depo, _birlestir(out, err), rc)
-
-
-def _kur_remote_yok() -> Fixture:
-    depo = _yeni_depo()
-    out, err, rc = g(depo, "push")
-    return Fixture("05_remote_yok", depo, _birlestir(out, err), rc)
-
-
-def _uzak_ekle(depo: str) -> str:
-    """Depoya gercek bir bare remote baglar; bare deponun yolunu dondurur."""
-    ust = os.path.dirname(depo)
-    # -b main sart: bare deponun HEAD'i master kalirsa klon bos cikar ve
-    # 07 fixture'i reddedilen push'u hic uretmez (bir kere yasandi).
-    g(ust, "init", "--bare", "-q", "-b", "main", "uzak.git")
-    bare = os.path.join(ust, "uzak.git")
-    g(depo, "remote", "add", "origin", bare)
+def _add_remote(repo: str) -> str:
+    """Attach a real bare remote; return the bare repository's path."""
+    parent = os.path.dirname(repo)
+    # -b main is REQUIRED: if the bare repo's HEAD stays on master the clone
+    # comes out empty and fixture 07 never produces a rejected push (this
+    # actually happened once).
+    g(parent, "init", "--bare", "-q", "-b", "main", "remote.git")
+    bare = os.path.join(parent, "remote.git")
+    g(repo, "remote", "add", "origin", bare)
     return bare
 
 
-def _kur_upstream_yok() -> Fixture:
-    depo = _yeni_depo()
-    _uzak_ekle(depo)
-    out, err, rc = g(depo, "push")
-    return Fixture("06_upstream_yok", depo, _birlestir(out, err), rc)
+# --- scenario builders -----------------------------------------------------
+
+def _build_detached() -> Fixture:
+    repo = _new_repo()
+    sha, _, _ = g(repo, "rev-parse", "HEAD~1")
+    out, err, rc = g(repo, "checkout", "-q", sha.strip())
+    # Here the command succeeds; the user notices the problem afterwards.
+    return Fixture("01_detached_head", repo, _combine(out, err), rc)
 
 
-def _kur_push_reddedildi() -> Fixture:
-    depo = _yeni_depo()
-    bare = _uzak_ekle(depo)
-    g(depo, "push", "-q", "-u", "origin", "main")
-    # Baskasi ayni branch'e commit atip gonderir.
-    ust = os.path.dirname(depo)
-    g(ust, "clone", "-q", bare, "klon")
-    klon = os.path.join(ust, "klon")
-    _yaz(klon, "a.txt", "baskasinin degisikligi\n")
-    g(klon, "commit", "-qam", "baskasinin commit'i")
-    g(klon, "push", "-q")
-    # Yerel depo haberi olmadan ayni dosyayi degistirir ve gondermeyi dener.
-    _yaz(depo, "a.txt", "benim degisikligim\n")
-    g(depo, "commit", "-qam", "benim commit'im")
-    out, err, rc = g(depo, "push")
-    return Fixture("07_push_reddedildi", depo, _birlestir(out, err), rc)
+def _build_merge_conflict() -> Fixture:
+    repo = _new_repo()
+    g(repo, "checkout", "-q", "-b", "feature")
+    _write(repo, "a.txt", "line1\nFEATURE\n")
+    g(repo, "commit", "-qam", "feature side")
+    g(repo, "checkout", "-q", "main")
+    _write(repo, "a.txt", "line1\nMAIN\n")
+    g(repo, "commit", "-qam", "main side")
+    out, err, rc = g(repo, "merge", "feature")
+    return Fixture("02_merge_conflict", repo, _combine(out, err), rc)
 
 
-def _kur_bagimlilik_sahnelendi() -> Fixture:
-    depo = _yeni_depo()
-    _yaz(depo, "node_modules/paket/index.js", "module.exports = 1\n")
-    _yaz(depo, "node_modules/paket/package.json", '{"name":"paket"}\n')
-    out, err, rc = g(depo, "add", "-A")
-    # Basarisiz komut yok: kullanici `git status` ciktisini gorup gelir.
-    return Fixture("09_bagimlilik_sahnelendi", depo, _birlestir(out, err), rc)
+def _build_rebase_in_progress() -> Fixture:
+    repo = _new_repo()
+    g(repo, "checkout", "-q", "-b", "feature", "HEAD~1")
+    _write(repo, "a.txt", "line1\nFEATURE\n")
+    g(repo, "commit", "-qam", "feature side")
+    out, err, rc = g(repo, "rebase", "main")
+    return Fixture("03_rebase_in_progress", repo, _combine(out, err), rc)
 
 
-def _kur_sir_sahnelendi() -> Fixture:
-    depo = _yeni_depo()
-    _yaz(depo, ".env", "API_KEY=sahte-test-degeri\n")
-    _yaz(depo, ".env.example", "API_KEY=\n")  # bu commit edilmeli, uyari vermemeli
-    out, err, rc = g(depo, "add", "-A")
-    return Fixture("10_sir_sahnelendi", depo, _birlestir(out, err), rc)
+def _build_cherry_pick_in_progress() -> Fixture:
+    repo = _new_repo()
+    g(repo, "checkout", "-q", "-b", "feature")
+    _write(repo, "a.txt", "line1\nFEATURE\n")
+    g(repo, "commit", "-qam", "feature side")
+    sha, _, _ = g(repo, "rev-parse", "HEAD")
+    g(repo, "checkout", "-q", "main")
+    _write(repo, "a.txt", "line1\nMAIN\n")
+    g(repo, "commit", "-qam", "main side")
+    out, err, rc = g(repo, "cherry-pick", sha.strip())
+    return Fixture("04_cherry_pick_in_progress", repo, _combine(out, err), rc)
 
 
-def _kur_cherry_pick_ortasi() -> Fixture:
-    depo = _yeni_depo()
-    g(depo, "checkout", "-q", "-b", "ozellik")
-    _yaz(depo, "a.txt", "satir1\nOZELLIK\n")
-    g(depo, "commit", "-qam", "ozellik tarafi")
-    sha, _, _ = g(depo, "rev-parse", "HEAD")
-    g(depo, "checkout", "-q", "main")
-    _yaz(depo, "a.txt", "satir1\nMAIN\n")
-    g(depo, "commit", "-qam", "main tarafi")
-    out, err, rc = g(depo, "cherry-pick", sha.strip())
-    return Fixture("04_cherry_pick_ortasi", depo, _birlestir(out, err), rc)
+def _build_revert_in_progress() -> Fixture:
+    repo = _new_repo()
+    _write(repo, "a.txt", "line1\nSOMETHING ELSE\n")
+    g(repo, "commit", "-qam", "third commit")
+    out, err, rc = g(repo, "revert", "HEAD~1")
+    return Fixture("04_cherry_pick_in_progress", repo, _combine(out, err), rc)
 
 
-def _kur_revert_ortasi() -> Fixture:
-    depo = _yeni_depo()
-    _yaz(depo, "a.txt", "satir1\nBASKA SATIR\n")
-    g(depo, "commit", "-qam", "ucuncu commit")
-    out, err, rc = g(depo, "revert", "HEAD~1")
-    return Fixture("04_cherry_pick_ortasi", depo, _birlestir(out, err), rc)
+def _build_no_remote() -> Fixture:
+    repo = _new_repo()
+    out, err, rc = g(repo, "push")
+    return Fixture("05_no_remote", repo, _combine(out, err), rc)
 
 
-def _kur_korumali_branch() -> Fixture:
-    """Senaryo 8: main'e dogrudan push, uzak taraf reddediyor.
+def _build_no_upstream() -> Fixture:
+    repo = _new_repo()
+    _add_remote(repo)
+    out, err, rc = g(repo, "push")
+    return Fixture("06_no_upstream", repo, _combine(out, err), rc)
 
-    Bare depoya pre-receive hook konur; GitHub'daki korumali branch
-    reddinin urettigi mesajin aynisi olusur.
+
+def _build_push_rejected() -> Fixture:
+    repo = _new_repo()
+    bare = _add_remote(repo)
+    g(repo, "push", "-q", "-u", "origin", "main")
+    # Someone else commits to the same branch and pushes.
+    parent = os.path.dirname(repo)
+    g(parent, "clone", "-q", bare, "clone")
+    clone = os.path.join(parent, "clone")
+    _write(clone, "a.txt", "someone else's change\n")
+    g(clone, "commit", "-qam", "their commit")
+    g(clone, "push", "-q")
+    # Our repo, unaware, changes the same file and tries to push.
+    _write(repo, "a.txt", "my change\n")
+    g(repo, "commit", "-qam", "my commit")
+    out, err, rc = g(repo, "push")
+    return Fixture("07_push_rejected", repo, _combine(out, err), rc)
+
+
+def _build_protected_branch() -> Fixture:
+    """Scenario 8: pushing straight to main, the remote refuses.
+
+    A pre-receive hook is placed in the bare repository, producing the same
+    message a protected branch on GitHub does.
     """
-    depo = _yeni_depo()
-    bare = _uzak_ekle(depo)
-    g(depo, "push", "-q", "-u", "origin", "main")
+    repo = _new_repo()
+    bare = _add_remote(repo)
+    g(repo, "push", "-q", "-u", "origin", "main")
     hook = os.path.join(bare, "hooks", "pre-receive")
     with open(hook, "w", encoding="utf-8", newline="\n") as f:
         f.write(
             "#!/bin/sh\n"
-            'echo "main korumali bir branch; ozellik branch\'i acip PR gonder" >&2\n'
+            'echo "main is a protected branch; open a feature branch and a PR" >&2\n'
             "exit 1\n"
         )
     os.chmod(hook, 0o755)
-    _yaz(depo, "b.txt", "yeni ozellik\n")
-    g(depo, "add", "b.txt")
-    g(depo, "commit", "-qm", "ozellik dogrudan main'e gitti")
-    out, err, rc = g(depo, "push")
-    return Fixture("08_yanlis_branch", depo, _birlestir(out, err), rc)
+    _write(repo, "b.txt", "new feature\n")
+    g(repo, "add", "b.txt")
+    g(repo, "commit", "-qm", "feature went straight to main")
+    out, err, rc = g(repo, "push")
+    return Fixture("08_wrong_branch", repo, _combine(out, err), rc)
 
 
-def _kur_checkout_engellendi() -> Fixture:
-    depo = _yeni_depo()
-    g(depo, "checkout", "-q", "-b", "ozellik")
-    _yaz(depo, "a.txt", "satir1\nOZELLIK\n")
-    g(depo, "commit", "-qam", "ozellik tarafi")
-    g(depo, "checkout", "-q", "main")
-    _yaz(depo, "a.txt", "satir1\nkaydedilmemis is\n")   # commit edilmedi
-    out, err, rc = g(depo, "checkout", "ozellik")
-    return Fixture("11_yerel_degisiklik_engelliyor", depo, _birlestir(out, err), rc)
+def _build_dependency_staged() -> Fixture:
+    repo = _new_repo()
+    _write(repo, "node_modules/package/index.js", "module.exports = 1\n")
+    _write(repo, "node_modules/package/package.json", '{"name":"package"}\n')
+    out, err, rc = g(repo, "add", "-A")
+    # No failing command: the user comes here after reading `git status`.
+    return Fixture("09_dependency_staged", repo, _combine(out, err), rc)
 
 
-def _kur_merge_engellendi() -> Fixture:
-    depo = _yeni_depo()
-    g(depo, "checkout", "-q", "-b", "ozellik")
-    _yaz(depo, "a.txt", "satir1\nOZELLIK\n")
-    g(depo, "commit", "-qam", "ozellik tarafi")
-    g(depo, "checkout", "-q", "main")
-    _yaz(depo, "a.txt", "satir1\nkaydedilmemis is\n")
-    out, err, rc = g(depo, "merge", "ozellik")
-    return Fixture("11_yerel_degisiklik_engelliyor", depo, _birlestir(out, err), rc)
+def _build_secret_staged() -> Fixture:
+    repo = _new_repo()
+    _write(repo, ".env", "API_KEY=fake-test-value\n")
+    _write(repo, ".env.example", "API_KEY=\n")  # must be committable, no warning
+    out, err, rc = g(repo, "add", "-A")
+    return Fixture("10_secret_staged", repo, _combine(out, err), rc)
 
 
-def _kur_kayip_commit_reset() -> Fixture:
-    depo = _yeni_depo()
-    _yaz(depo, "c.txt", "saatlerce ugrasilan is\n")
-    g(depo, "add", "c.txt")
-    g(depo, "commit", "-qm", "saatlerce ugrasilan is")
-    out, err, rc = g(depo, "reset", "--hard", "HEAD~1")
-    return Fixture("12_kayip_commit", depo, _birlestir(out, err), rc)
+def _build_checkout_blocked() -> Fixture:
+    repo = _new_repo()
+    g(repo, "checkout", "-q", "-b", "feature")
+    _write(repo, "a.txt", "line1\nFEATURE\n")
+    g(repo, "commit", "-qam", "feature side")
+    g(repo, "checkout", "-q", "main")
+    _write(repo, "a.txt", "line1\nuncommitted work\n")   # never committed
+    out, err, rc = g(repo, "checkout", "feature")
+    return Fixture("11_local_changes_block", repo, _combine(out, err), rc)
 
 
-def _kur_kayip_commit_branch_silindi() -> Fixture:
-    depo = _yeni_depo()
-    g(depo, "checkout", "-q", "-b", "ozellik")
-    _yaz(depo, "c.txt", "branch ile birlikte giden is\n")
-    g(depo, "add", "c.txt")
-    g(depo, "commit", "-qm", "branch ile birlikte giden is")
-    g(depo, "checkout", "-q", "main")
-    out, err, rc = g(depo, "branch", "-D", "ozellik")
-    return Fixture("12_kayip_commit", depo, _birlestir(out, err), rc)
+def _build_merge_blocked() -> Fixture:
+    repo = _new_repo()
+    g(repo, "checkout", "-q", "-b", "feature")
+    _write(repo, "a.txt", "line1\nFEATURE\n")
+    g(repo, "commit", "-qam", "feature side")
+    g(repo, "checkout", "-q", "main")
+    _write(repo, "a.txt", "line1\nuncommitted work\n")
+    out, err, rc = g(repo, "merge", "feature")
+    return Fixture("11_local_changes_block", repo, _combine(out, err), rc)
 
 
-# --- negatif kontroller: hicbir senaryoya eslesmemeli --------------------
-
-def _kur_temiz() -> Fixture:
-    """Sorunsuz depo. Eslesirse yanlis pozitif var."""
-    depo = _yeni_depo()
-    return Fixture("(eslesme yok)", depo, "", 0)
-
-
-def _kur_amend_sonrasi() -> Fixture:
-    """`git commit --amend` eski commit'i erisilemez birakir ama bu bir kayip
-    degil, kasitli bir islem. Senaryo 12 bunu kayip commit saymamali."""
-    depo = _yeni_depo()
-    _yaz(depo, "a.txt", "satir1\nsatir2\nsatir3\n")
-    out, err, rc = g(depo, "commit", "-qam", "ikinci commit duzeltildi", "--amend")
-    return Fixture("(eslesme yok)", depo, _birlestir(out, err), rc)
+def _build_lost_commit_reset() -> Fixture:
+    repo = _new_repo()
+    _write(repo, "c.txt", "hours of work\n")
+    g(repo, "add", "c.txt")
+    g(repo, "commit", "-qm", "hours of work")
+    out, err, rc = g(repo, "reset", "--hard", "HEAD~1")
+    return Fixture("12_lost_commit", repo, _combine(out, err), rc)
 
 
-def _kur_main_ileride() -> Fixture:
-    """main'de 1 commit var, gonderilmemis. Tek basina calisan birinin
-    normal hali: senaryo 8 bunu "yanlis branch" sanmamali."""
-    depo = _yeni_depo()
-    _uzak_ekle(depo)
-    g(depo, "push", "-q", "-u", "origin", "main")
-    _yaz(depo, "d.txt", "normal is\n")
-    g(depo, "add", "d.txt")
-    g(depo, "commit", "-qm", "normal is")
-    return Fixture("(eslesme yok)", depo, "", 0)
+def _build_lost_commit_branch_deleted() -> Fixture:
+    repo = _new_repo()
+    g(repo, "checkout", "-q", "-b", "feature")
+    _write(repo, "c.txt", "work that went with the branch\n")
+    g(repo, "add", "c.txt")
+    g(repo, "commit", "-qm", "work that went with the branch")
+    g(repo, "checkout", "-q", "main")
+    out, err, rc = g(repo, "branch", "-D", "feature")
+    return Fixture("12_lost_commit", repo, _combine(out, err), rc)
 
 
-# Varyant anahtari -> kurucu. Bir senaryonun birden fazla fixture'i olabilir:
-# ayni senaryo kimligini donduren her varyant matriste ayni satira dusuyor.
-KURUCULAR: Dict[str, Callable[[], Fixture]] = {
-    "01_detached_head": _kur_detached,
-    "02_merge_cakismasi": _kur_merge_cakismasi,
-    "03_rebase_ortasi": _kur_rebase_ortasi,
-    "04_cherry_pick": _kur_cherry_pick_ortasi,
-    "04_revert": _kur_revert_ortasi,
-    "05_remote_yok": _kur_remote_yok,
-    "06_upstream_yok": _kur_upstream_yok,
-    "07_push_reddedildi": _kur_push_reddedildi,
-    "08_korumali_branch": _kur_korumali_branch,
-    "09_bagimlilik_sahnelendi": _kur_bagimlilik_sahnelendi,
-    "10_sir_sahnelendi": _kur_sir_sahnelendi,
-    "11_checkout_engellendi": _kur_checkout_engellendi,
-    "11_merge_engellendi": _kur_merge_engellendi,
-    "12_reset_hard": _kur_kayip_commit_reset,
-    "12_branch_silindi": _kur_kayip_commit_branch_silindi,
-    "neg_temiz": _kur_temiz,
-    "neg_amend": _kur_amend_sonrasi,
-    "neg_main_ileride": _kur_main_ileride,
+# --- negative controls: these must match no scenario ----------------------
+
+def _build_clean() -> Fixture:
+    """A healthy repository. A match here is a false positive."""
+    repo = _new_repo()
+    return Fixture("(no match)", repo, "", 0)
+
+
+def _build_after_amend() -> Fixture:
+    """`git commit --amend` leaves the old commit unreachable, but that is a
+    deliberate operation, not a loss. Scenario 12 must not count it."""
+    repo = _new_repo()
+    _write(repo, "a.txt", "line1\nline2\nline3\n")
+    out, err, rc = g(repo, "commit", "-qam", "second commit, fixed", "--amend")
+    return Fixture("(no match)", repo, _combine(out, err), rc)
+
+
+def _build_main_ahead() -> Fixture:
+    """One unpushed commit on main. The perfectly normal state of someone
+    working alone: scenario 8 must not call this a wrong branch."""
+    repo = _new_repo()
+    _add_remote(repo)
+    g(repo, "push", "-q", "-u", "origin", "main")
+    _write(repo, "d.txt", "normal work\n")
+    g(repo, "add", "d.txt")
+    g(repo, "commit", "-qm", "normal work")
+    return Fixture("(no match)", repo, "", 0)
+
+
+# Variant key -> builder. A scenario may have several fixtures: every variant
+# returning the same scenario id lands on the same row of the matrix.
+BUILDERS: Dict[str, Callable[[], Fixture]] = {
+    "01_detached_head": _build_detached,
+    "02_merge_conflict": _build_merge_conflict,
+    "03_rebase_in_progress": _build_rebase_in_progress,
+    "04_cherry_pick": _build_cherry_pick_in_progress,
+    "04_revert": _build_revert_in_progress,
+    "05_no_remote": _build_no_remote,
+    "06_no_upstream": _build_no_upstream,
+    "07_push_rejected": _build_push_rejected,
+    "08_protected_branch": _build_protected_branch,
+    "09_dependency_staged": _build_dependency_staged,
+    "10_secret_staged": _build_secret_staged,
+    "11_checkout_blocked": _build_checkout_blocked,
+    "11_merge_blocked": _build_merge_blocked,
+    "12_reset_hard": _build_lost_commit_reset,
+    "12_branch_deleted": _build_lost_commit_branch_deleted,
+    "neg_clean": _build_clean,
+    "neg_amend": _build_after_amend,
+    "neg_main_ahead": _build_main_ahead,
 }
 
-VARYANTLAR = tuple(KURUCULAR)
+VARIANTS = tuple(BUILDERS)
 
-# Matris satirlari: her senaryo kimligi bir kere, varyant sirasina gore.
-SENARYOLAR = (
+# Matrix rows: each scenario id once, in variant order.
+SCENARIOS = (
     "01_detached_head",
-    "02_merge_cakismasi",
-    "03_rebase_ortasi",
-    "04_cherry_pick_ortasi",
-    "05_remote_yok",
-    "06_upstream_yok",
-    "07_push_reddedildi",
-    "08_yanlis_branch",
-    "09_bagimlilik_sahnelendi",
-    "10_sir_sahnelendi",
-    "11_yerel_degisiklik_engelliyor",
-    "12_kayip_commit",
-    "(eslesme yok)",
+    "02_merge_conflict",
+    "03_rebase_in_progress",
+    "04_cherry_pick_in_progress",
+    "05_no_remote",
+    "06_no_upstream",
+    "07_push_rejected",
+    "08_wrong_branch",
+    "09_dependency_staged",
+    "10_secret_staged",
+    "11_local_changes_block",
+    "12_lost_commit",
+    "(no match)",
 )
 
 
-def kur(varyant: str) -> Fixture:
-    """Varyanti gercek bir depoda kurar.
+def build(variant: str) -> Fixture:
+    """Build the variant in a real repository.
 
-    Senaryo kimligi de kabul edilir: o senaryonun ilk varyanti kurulur.
+    A scenario id is accepted too: its first variant gets built.
     """
-    if varyant in KURUCULAR:
-        return KURUCULAR[varyant]()
-    for ad, islev in KURUCULAR.items():
-        if ad.split("_")[0] == varyant.split("_")[0]:
-            return islev()
-    raise KeyError("fixture yok: " + varyant)
+    if variant in BUILDERS:
+        return BUILDERS[variant]()
+    for name, func in BUILDERS.items():
+        if name.split("_")[0] == variant.split("_")[0]:
+            return func()
+    raise KeyError("no such fixture: " + variant)
 
 
-def hepsi() -> List[Fixture]:
-    return [KURUCULAR[v]() for v in VARYANTLAR]
+def all_fixtures() -> List[Fixture]:
+    return [BUILDERS[v]() for v in VARIANTS]
 
 
-def temizle() -> None:
-    """Kurulan tum gecici depolari siler."""
-    while _KOKLER:
-        shutil.rmtree(_KOKLER.pop(), ignore_errors=True)
+def cleanup() -> None:
+    """Remove every temporary repository built so far."""
+    while _ROOTS:
+        shutil.rmtree(_ROOTS.pop(), ignore_errors=True)

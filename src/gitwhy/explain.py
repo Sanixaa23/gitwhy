@@ -1,12 +1,13 @@
-"""Senaryo kimligi + baglam -> okunabilir metin.
+"""Scenario id + context -> readable text.
 
-Iki mod:
-  - Sablon modu (varsayilan): scenarios/*.md dosyalari, baglam degerleri
-    yerlestirilmis. Agsiz, deterministik, aninda.
-  - LLM modu (--ai, henuz yok): ayni sablonu kullanicinin seviyesine gore
-    yeniden yazar. Karar LLM'de DEGIL; LLM sadece metni yeniden yazar.
+Two modes:
+  - Template mode (default): the scenarios/*.md files with context values
+    filled in. Offline, deterministic, instant.
+  - LLM mode (--ai, not built yet): rewrites the same template for the
+    reader's level. The DECISION is not made by the LLM; the LLM only
+    rewrites the prose.
 
-Guvenlik: bu modul hicbir komut CALISTIRMAZ. Sadece metin uretir.
+Safety: this module RUNS NOTHING. It only produces text.
 """
 from __future__ import annotations
 
@@ -15,13 +16,13 @@ import re
 from typing import Dict, Optional
 
 from . import rules
-from .context import Baglam
+from .context import Context
 
-SABLON_DIZINI = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scenarios")
+TEMPLATE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scenarios")
 
-# Geri alinamaz veri kaybina yol acabilen komutlar. Sablonlarda bunlardan biri
-# geciyorsa sablon UYARI_ISARETI tasimak zorunda; test_safety.py bunu dogrular.
-YIKICI_KOMUTLAR = (
+# Commands that can cause irreversible data loss. If a template contains one
+# of these, it must carry a warning; test_safety.py enforces that.
+DESTRUCTIVE_COMMANDS = (
     "git reset --hard",
     "git clean -f",
     "git checkout --",
@@ -40,9 +41,9 @@ YIKICI_KOMUTLAR = (
     "--discard-changes",
 )
 
-# Bir --run secenegi eklenirse YALNIZCA bunlar otomatik calistirilabilir.
-# Hepsi geri alinabilir islemler. Bu listeye yikici komut eklenemez.
-OTOMATIK_CALISTIRILABILIR = (
+# If a --run option is ever added, ONLY these may run automatically.
+# All of them are reversible. No destructive command may join this list.
+AUTO_RUNNABLE = (
     "git switch",
     "git stash push",
     "git branch",
@@ -52,160 +53,161 @@ OTOMATIK_CALISTIRILABILIR = (
     "git log",
 )
 
-# Sablonlardaki uyari satiri bu isaretle baslar ve KALICI kelimesini tasir.
-UYARI_ONEKI = "> UYARI:"
-UYARI_ISARETI = "KALICI"
+# A warning line in a template starts with this prefix and carries the word
+# PERMANENTLY.
+WARNING_PREFIX = "> WARNING:"
+WARNING_MARKER = "PERMANENTLY"
 
-_YER_TUTUCU = re.compile(r"\{\{(\w+)\}\}")
+_PLACEHOLDER = re.compile(r"\{\{(\w+)\}\}")
 
 
-def degerler(ctx: Baglam) -> Dict[str, str]:
-    """Sablonlarda kullanilabilen yer tutucular."""
-    bagimlilik = rules.bagimlilik_yollari(ctx)
-    sir = rules.sir_yollari(ctx)
-    kayip = ctx.kayip
+def values(ctx: Context) -> Dict[str, str]:
+    """The placeholders available inside templates."""
+    dependencies = rules.dependency_paths(ctx)
+    secrets = rules.secret_paths(ctx)
+    lost = ctx.lost
     return {
-        "depo": ctx.depo,
-        "branch": ctx.branch or "(branch yok)",
-        "upstream": ctx.upstream or "(tanimli degil)",
-        "ileri": str(ctx.ileri),
-        "geri": str(ctx.geri),
-        "oid_kisa": ctx.oid_kisa,
-        "son_mesaj": ctx.son_mesaj or "(commit yok)",
-        "cakisan": ", ".join(ctx.cakisan) or "(yok)",
-        "cakisan_ilk": ctx.cakisan[0] if ctx.cakisan else "<dosya>",
-        "cakisan_sayisi": str(len(ctx.cakisan)),
-        "sahnelenen": ", ".join(ctx.sahnelenen) or "(yok)",
-        "sahnelenen_sayisi": str(len(ctx.sahnelenen)),
-        "surmekte": ", ".join(ctx.surmekte) or "(yok)",
-        "surmekte_komut": _surmekte_komut(ctx),
-        "kaydedilmemis": ", ".join(ctx.kaydedilmemis) or "(yok)",
-        "kaydedilmemis_ilk": ctx.kaydedilmemis[0] if ctx.kaydedilmemis else "<dosya>",
-        "kaydedilmemis_sayisi": str(len(ctx.kaydedilmemis)),
-        "kayip_sayisi": str(len(kayip)),
-        "kayip_listesi": "\n".join(
-            "- `%s` — %s  (reflog: %s)" % (s[:8], konu, sonraki)
-            for s, konu, sonraki in kayip
-        ) or "- (yok)",
-        "kayip_ilk_sha": kayip[0][0][:8] if kayip else "<sha>",
-        "kayip_ilk_konu": kayip[0][1] if kayip else "(bilinmiyor)",
-        "remoteler": ", ".join(ctx.remoteler) or "(yok)",
-        "ilk_remote": ctx.remoteler[0] if ctx.remoteler else "origin",
-        "user_email": ctx.user_email or "(tanimli degil)",
-        "bagimlilik": ", ".join(bagimlilik) or "(yok)",
-        "bagimlilik_ilk": bagimlilik[0] if bagimlilik else "<dizin>",
-        "bagimlilik_sayisi": str(len(bagimlilik)),
-        "sir": ", ".join(sir) or "(yok)",
-        "sir_ilk": sir[0] if sir else "<dosya>",
-        "sir_sayisi": str(len(sir)),
-        "ignore_durumu": _ignore_durumu(ctx, bagimlilik + sir),
+        "repo": ctx.repo,
+        "branch": ctx.branch or "(no branch)",
+        "upstream": ctx.upstream or "(not set)",
+        "ahead": str(ctx.ahead),
+        "behind": str(ctx.behind),
+        "short_oid": ctx.short_oid,
+        "last_subject": ctx.last_subject or "(no commit yet)",
+        "conflicted": ", ".join(ctx.conflicted) or "(none)",
+        "first_conflicted": ctx.conflicted[0] if ctx.conflicted else "<file>",
+        "conflicted_count": str(len(ctx.conflicted)),
+        "staged": ", ".join(ctx.staged) or "(none)",
+        "staged_count": str(len(ctx.staged)),
+        "unstaged": ", ".join(ctx.unstaged) or "(none)",
+        "first_unstaged": ctx.unstaged[0] if ctx.unstaged else "<file>",
+        "unstaged_count": str(len(ctx.unstaged)),
+        "in_progress": ", ".join(ctx.in_progress) or "(none)",
+        "in_progress_command": _in_progress_command(ctx),
+        "remotes": ", ".join(ctx.remotes) or "(none)",
+        "first_remote": ctx.remotes[0] if ctx.remotes else "origin",
+        "user_email": ctx.user_email or "(not set)",
+        "dependencies": ", ".join(dependencies) or "(none)",
+        "first_dependency": dependencies[0] if dependencies else "<directory>",
+        "dependency_count": str(len(dependencies)),
+        "secrets": ", ".join(secrets) or "(none)",
+        "first_secret": secrets[0] if secrets else "<file>",
+        "secret_count": str(len(secrets)),
+        "lost_count": str(len(lost)),
+        "lost_list": "\n".join(
+            "- `%s` — %s  (reflog: %s)" % (sha[:8], subject, next_op)
+            for sha, subject, next_op in lost
+        ) or "- (none)",
+        "first_lost_sha": lost[0][0][:8] if lost else "<sha>",
+        "first_lost_subject": lost[0][1] if lost else "(unknown)",
+        "ignore_status": _ignore_status(ctx, dependencies + secrets),
     }
 
 
-def _surmekte_komut(ctx: Baglam) -> str:
-    """Yarim kalmis islemin git komut adi: senaryo 4 sablonu bunu kullanir.
+def _in_progress_command(ctx: Context) -> str:
+    """The git command name of the half-finished operation; scenario 4 uses it.
 
-    `git cherry-pick --continue` ile `git revert --continue` ayri komutlar;
-    yeni baslayana ikisini birden gostermek yerine dogru olani veriyoruz.
+    `git cherry-pick --continue` and `git revert --continue` are different
+    commands; rather than showing a beginner both, we give the right one.
     """
-    if "REVERT_HEAD" in ctx.surmekte:
+    if "REVERT_HEAD" in ctx.in_progress:
         return "revert"
-    if "CHERRY_PICK_HEAD" in ctx.surmekte:
+    if "CHERRY_PICK_HEAD" in ctx.in_progress:
         return "cherry-pick"
-    if "rebase-merge" in ctx.surmekte or "rebase-apply" in ctx.surmekte:
+    if "rebase-merge" in ctx.in_progress or "rebase-apply" in ctx.in_progress:
         return "rebase"
-    if "MERGE_HEAD" in ctx.surmekte:
+    if "MERGE_HEAD" in ctx.in_progress:
         return "merge"
     return "cherry-pick"
 
 
-def _ignore_durumu(ctx: Baglam, yollar) -> str:
-    """.gitignore bu yollari kapsiyor mu; kapsiyorsa bu baska bir sorun."""
-    if not yollar:
-        return "sahnelenmis sorunlu yol yok"
-    kapsanan = [y for y in ctx.ignore_edilen if any(y.startswith(x) for x in yollar)]
-    if kapsanan:
+def _ignore_status(ctx: Context, paths) -> str:
+    """Does .gitignore cover these paths? If it does, that is a different problem."""
+    if not paths:
+        return "no problematic staged path"
+    covered = [p for p in ctx.ignored_staged if any(p.startswith(x) for x in paths)]
+    if covered:
         return (
-            ".gitignore bu yolu zaten kapsiyor (%s) — dosya buna ragmen "
-            "sahnelenmis. Ya `git add -f` kullanilmis ya da kural dosya "
-            "eklendikten sonra yazilmis; ignore kurali takip edilen bir "
-            "dosyayi takipten cikarmaz." % ", ".join(kapsanan[:3])
+            ".gitignore already covers this path (%s) — the file was staged "
+            "anyway. Either `git add -f` was used, or the rule was written "
+            "after the file was added; an ignore rule does not untrack a file "
+            "that is already tracked." % ", ".join(covered[:3])
         )
-    return ".gitignore bu yolu kapsamiyor"
+    return ".gitignore does not cover this path"
 
 
-def sablon_oku(senaryo_id: str) -> str:
-    yol = os.path.join(SABLON_DIZINI, senaryo_id + ".md")
-    with open(yol, encoding="utf-8") as f:
+def read_template(scenario_id: str) -> str:
+    path = os.path.join(TEMPLATE_DIR, scenario_id + ".md")
+    with open(path, encoding="utf-8") as f:
         return f.read()
 
 
-def sablonlar() -> Dict[str, str]:
-    """Tum sablonlari {senaryo_id: metin} olarak dondurur (test_safety icin)."""
-    if not os.path.isdir(SABLON_DIZINI):
+def templates() -> Dict[str, str]:
+    """All templates as {scenario_id: text} (used by test_safety)."""
+    if not os.path.isdir(TEMPLATE_DIR):
         return {}
     return {
-        ad[:-3]: sablon_oku(ad[:-3])
-        for ad in sorted(os.listdir(SABLON_DIZINI))
-        if ad.endswith(".md")
+        name[:-3]: read_template(name[:-3])
+        for name in sorted(os.listdir(TEMPLATE_DIR))
+        if name.endswith(".md")
     }
 
 
-def doldur(sablon: str, ctx: Baglam) -> str:
-    """{{anahtar}} yer tutucularini baglam degerleriyle degistirir.
+def fill(template: str, ctx: Context) -> str:
+    """Replace {{key}} placeholders with context values.
 
-    Bilinmeyen anahtar oldugu gibi birakilir: sablon yazim hatasi sessizce
-    kaybolmasin, ciktida gorunsun.
+    An unknown key is left as-is so that a typo in a template shows up in the
+    output instead of disappearing silently.
     """
-    d = degerler(ctx)
-    return _YER_TUTUCU.sub(lambda m: d.get(m.group(1), m.group(0)), sablon)
+    v = values(ctx)
+    return _PLACEHOLDER.sub(lambda m: v.get(m.group(1), m.group(0)), template)
 
 
-def anlat(senaryo_id: Optional[str], ctx: Baglam) -> str:
-    """Senaryo metnini uretir. Eslesme yoksa durum dokumu dondurur."""
-    if senaryo_id is None:
-        return _eslesme_yok(ctx)
+def explain(scenario_id: Optional[str], ctx: Context) -> str:
+    """Produce the scenario text. Falls back to a state dump when nothing matched."""
+    if scenario_id is None:
+        return _no_match(ctx)
     try:
-        sablon = sablon_oku(senaryo_id)
+        template = read_template(scenario_id)
     except FileNotFoundError:
         return (
-            "Senaryo eslesti ama sablonu yok: %s\n"
-            "src/gitwhy/scenarios/%s.md dosyasini yaz.\n" % (senaryo_id, senaryo_id)
+            "Scenario matched but its template is missing: %s\n"
+            "Write src/gitwhy/scenarios/%s.md\n" % (scenario_id, scenario_id)
         )
-    return doldur(sablon, ctx)
+    return fill(template, ctx)
 
 
-def _eslesme_yok(ctx: Baglam) -> str:
-    if not ctx.gecerli_depo:
+def _no_match(ctx: Context) -> str:
+    if not ctx.is_repo:
         return (
-            "## Ne oldu\n\n"
-            "Burasi bir git deposu degil: %s\n\n"
-            "## Ne yapmalisin\n\n"
-            "    git init\n" % ctx.depo
+            "## What happened\n\n"
+            "This is not a git repository: %s\n\n"
+            "## What to do\n\n"
+            "    git init\n" % ctx.repo
         )
-    d = degerler(ctx)
+    v = values(ctx)
     return (
-        "## Eslesen senaryo yok\n\n"
-        "gitwhy su an %d senaryodan %d'ini taniyor; bu durum onlardan biri degil.\n\n"
-        % (len(rules.SENARYOLAR), len(rules.UYGULANAN)) +
-        "## Neredesin\n\n"
-        "- Depo: %(depo)s\n"
+        "## No matching scenario\n\n"
+        "gitwhy knows %d of %d scenarios; this state is not one of them.\n\n"
+        % (len(rules.IMPLEMENTED), len(rules.SCENARIOS)) +
+        "## Where you are\n\n"
+        "- Repository: %(repo)s\n"
         "- Branch: %(branch)s\n"
-        "- Upstream: %(upstream)s (ileri %(ileri)s / geri %(geri)s)\n"
-        "- Cakisan dosya: %(cakisan)s\n"
-        "- Surmekte olan islem: %(surmekte)s\n"
-        "- Sahnelenmis dosya: %(sahnelenen_sayisi)s\n" % d
+        "- Upstream: %(upstream)s (ahead %(ahead)s / behind %(behind)s)\n"
+        "- Conflicted files: %(conflicted)s\n"
+        "- Operation in progress: %(in_progress)s\n"
+        "- Staged files: %(staged_count)s\n" % v
     )
 
 
-def yikici_mi(metin: str) -> bool:
-    """Verilen metinde geri alinamaz bir komut geciyor mu."""
-    return any(k in metin for k in YIKICI_KOMUTLAR)
+def is_destructive(text: str) -> bool:
+    """Does this text contain an irreversible command?"""
+    return any(cmd in text for cmd in DESTRUCTIVE_COMMANDS)
 
 
-def uyari_tasiyor(metin: str) -> bool:
-    """Metinde kurallara uygun bir uyari satiri var mi."""
-    for satir in metin.splitlines():
-        if satir.strip().startswith(UYARI_ONEKI):
+def has_warning(text: str) -> bool:
+    """Does this text carry a properly formed warning line?"""
+    for line in text.splitlines():
+        if line.strip().startswith(WARNING_PREFIX):
             return True
     return False

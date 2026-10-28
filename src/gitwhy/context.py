@@ -1,10 +1,11 @@
-"""Salt-okunur git sorgulari ve tek bir Baglam nesnesi.
+"""Read-only git queries collected into a single Context object.
 
-Bu modul depoyu ASLA degistirmez. Buraya eklenecek her yeni komut salt-okunur
-olmak zorunda: bir komut depoyu degistirebiliyorsa bu dosyaya girmez.
+This module NEVER modifies the repository. Every command added here must be
+read-only: if a command could change the repo, it does not belong in this file.
+`tests/test_safety.py` enforces that by scanning this source.
 
-Birincil sinyal depo durumu, hata metni degil. Git surumleri hata mesajlarini
-degistirir ama --porcelain=v2 cikti bicimi sabit tutulur.
+The primary signal is repository state, not error text. Git changes its error
+messages between versions, but the --porcelain=v2 output format is stable.
 """
 from __future__ import annotations
 
@@ -13,8 +14,8 @@ import subprocess
 from dataclasses import dataclass, field
 from typing import List, Optional, Set, Tuple
 
-# .git dizininde varligi yarim kalmis bir islemi gosteren yollar.
-SURMEKTE_YOLLARI = (
+# Paths inside .git whose presence means an operation was left half-finished.
+IN_PROGRESS_PATHS = (
     "MERGE_HEAD",
     "rebase-merge",
     "rebase-apply",
@@ -23,10 +24,10 @@ SURMEKTE_YOLLARI = (
 )
 
 
-def _ortam() -> dict:
-    """LC_ALL=C: kendi sorgularimizin cikti dili sabit kalsin. Kullanicinin
-    gordugu hata mesaji bundan etkilenmez, onu biz uretmiyoruz.
-    GIT_OPTIONAL_LOCKS=0: index'e yazma ihtimalini de kaldirir.
+def _env() -> dict:
+    """LC_ALL=C keeps OUR queries' output language fixed. It does not affect
+    the error the user saw; we did not produce that one.
+    GIT_OPTIONAL_LOCKS=0 removes even the chance of writing to the index.
     """
     return dict(
         os.environ,
@@ -37,16 +38,16 @@ def _ortam() -> dict:
     )
 
 
-def _git(depo: str, *arg: str) -> Tuple[str, str, int]:
-    """git'i `depo` icinde kosar; (stdout, stderr, exit) dondurur."""
+def _git(repo: str, *args: str) -> Tuple[str, str, int]:
+    """Run git inside `repo`; return (stdout, stderr, exit code)."""
     try:
         p = subprocess.run(
-            ["git", "-C", depo, *arg],
+            ["git", "-C", repo, *args],
             capture_output=True,
-            env=_ortam(),
+            env=_env(),
         )
     except FileNotFoundError:
-        return "", "git bulunamadi", 127
+        return "", "git not found", 127
     return (
         p.stdout.decode("utf-8", "replace"),
         p.stderr.decode("utf-8", "replace"),
@@ -55,214 +56,215 @@ def _git(depo: str, *arg: str) -> Tuple[str, str, int]:
 
 
 @dataclass
-class Baglam:
-    """Deponun o anki durumu. rules.esle() sadece bunu ve hata metnini gorur."""
+class Context:
+    """The repository's current state. rules.match() sees only this and the
+    error text."""
 
-    depo: str
-    gecerli_depo: bool = False
+    repo: str
+    is_repo: bool = False
     git_dir: Optional[str] = None
-    branch: Optional[str] = None          # detached ise None
+    branch: Optional[str] = None          # None when detached
     detached: bool = False
-    oid: Optional[str] = None             # HEAD commit'i; commit yoksa None
+    oid: Optional[str] = None             # HEAD commit; None before first commit
     upstream: Optional[str] = None
-    ileri: int = 0                        # upstream'den kac commit ileride
-    geri: int = 0                         # upstream'den kac commit geride
-    cakisan: List[str] = field(default_factory=list)
-    surmekte: List[str] = field(default_factory=list)
-    sahnelenen: List[str] = field(default_factory=list)
-    # Diskte degismis ama sahnelenmemis dosyalar. Senaryo 11 bunlari sayar.
-    kaydedilmemis: List[str] = field(default_factory=list)
-    # (sha, commit konusu, reflog'da bundan sonra gelen islem)
-    kayip: List[Tuple[str, str, str]] = field(default_factory=list)
-    remote_var: bool = False
-    remoteler: List[str] = field(default_factory=list)
-    # Sahnelenmis yollardan .gitignore kurallarina takilanlar. Dolu olmasi
-    # "kural var ama dosya yine de sahnelenmis" demektir (git add -f, veya
-    # kural dosya eklendikten sonra yazilmis).
-    ignore_edilen: List[str] = field(default_factory=list)
-    son_mesaj: Optional[str] = None
+    ahead: int = 0                        # commits ahead of upstream
+    behind: int = 0                       # commits behind upstream
+    conflicted: List[str] = field(default_factory=list)
+    in_progress: List[str] = field(default_factory=list)
+    staged: List[str] = field(default_factory=list)
+    # Changed on disk but not staged. Scenario 11 counts these.
+    unstaged: List[str] = field(default_factory=list)
+    # (sha, commit subject, the reflog entry that followed it)
+    lost: List[Tuple[str, str, str]] = field(default_factory=list)
+    has_remote: bool = False
+    remotes: List[str] = field(default_factory=list)
+    # Staged paths that .gitignore rules match. A non-empty list means
+    # "a rule exists and the file was staged anyway" (git add -f, or the
+    # rule was written after the file was added).
+    ignored_staged: List[str] = field(default_factory=list)
+    last_subject: Optional[str] = None
     user_email: Optional[str] = None
 
     @property
-    def oid_kisa(self) -> str:
-        return (self.oid or "")[:7] or "yok"
+    def short_oid(self) -> str:
+        return (self.oid or "")[:7] or "none"
 
 
-def _durum_ayristir(ctx: Baglam, cikti: str) -> None:
-    """`git status --porcelain=v2 --branch` ciktisini Baglam'a isler.
+def _parse_status(ctx: Context, out: str) -> None:
+    """Parse `git status --porcelain=v2 --branch` into the Context.
 
-    Ilgilendigimiz satirlar:
+    Lines we care about:
       # branch.oid <sha> | (initial)
-      # branch.head <ad> | (detached)
-      # branch.upstream <ad>          -- upstream yoksa bu satir hic yok
-      # branch.ab +<ileri> -<geri>    -- upstream yoksa bu satir hic yok
-      u <xy> ... <yol>                -- cakisan dosya
-      1/2 <xy> ... <yol>              -- degismis dosya; xy[1] != '.' ise
-                                         degisiklik sahnelenmemis
+      # branch.head <name> | (detached)
+      # branch.upstream <name>        -- absent entirely when there is none
+      # branch.ab +<ahead> -<behind>  -- absent entirely when there is none
+      u <xy> ... <path>               -- conflicted file
+      1/2 <xy> ... <path>             -- changed file; xy[1] != '.' means the
+                                         change is not staged
     """
-    for satir in cikti.splitlines():
-        if satir.startswith("# branch.oid "):
-            deger = satir[len("# branch.oid "):].strip()
-            ctx.oid = None if deger == "(initial)" else deger
-        elif satir.startswith("# branch.head "):
-            deger = satir[len("# branch.head "):].strip()
-            if deger == "(detached)":
+    for line in out.splitlines():
+        if line.startswith("# branch.oid "):
+            value = line[len("# branch.oid "):].strip()
+            ctx.oid = None if value == "(initial)" else value
+        elif line.startswith("# branch.head "):
+            value = line[len("# branch.head "):].strip()
+            if value == "(detached)":
                 ctx.detached = True
                 ctx.branch = None
             else:
-                ctx.branch = deger
-        elif satir.startswith("# branch.upstream "):
-            ctx.upstream = satir[len("# branch.upstream "):].strip()
-        elif satir.startswith("# branch.ab "):
-            for parca in satir[len("# branch.ab "):].split():
-                if parca.startswith("+"):
-                    ctx.ileri = int(parca[1:] or 0)
-                elif parca.startswith("-"):
-                    ctx.geri = int(parca[1:] or 0)
-        elif satir.startswith("u "):
-            # u <xy> <sub> <m1> <m2> <m3> <mW> <h1> <h2> <h3> <yol>
-            alan = satir.split(" ", 10)
-            if len(alan) == 11:
-                ctx.cakisan.append(alan[10])
-        elif satir.startswith("1 ") or satir.startswith("2 "):
-            # 1 <xy> <sub> <mH> <mI> <mW> <hH> <hI> <yol>
-            alan = satir.split(" ", 8)
-            if len(alan) == 9 and len(alan[1]) == 2 and alan[1][1] != ".":
-                # 2 (kopyalanmis/tasinmis) satirinda yol "yeni\teski" bicimli
-                ctx.kaydedilmemis.append(alan[8].split("\t")[0])
+                ctx.branch = value
+        elif line.startswith("# branch.upstream "):
+            ctx.upstream = line[len("# branch.upstream "):].strip()
+        elif line.startswith("# branch.ab "):
+            for part in line[len("# branch.ab "):].split():
+                if part.startswith("+"):
+                    ctx.ahead = int(part[1:] or 0)
+                elif part.startswith("-"):
+                    ctx.behind = int(part[1:] or 0)
+        elif line.startswith("u "):
+            # u <xy> <sub> <m1> <m2> <m3> <mW> <h1> <h2> <h3> <path>
+            fields = line.split(" ", 10)
+            if len(fields) == 11:
+                ctx.conflicted.append(fields[10])
+        elif line.startswith("1 ") or line.startswith("2 "):
+            # 1 <xy> <sub> <mH> <mI> <mW> <hH> <hI> <path>
+            fields = line.split(" ", 8)
+            if len(fields) == 9 and len(fields[1]) == 2 and fields[1][1] != ".":
+                # On a "2 " (renamed/copied) line the path is "new\told"
+                ctx.unstaged.append(fields[8].split("\t")[0])
 
 
-def topla(depo: str = ".") -> Baglam:
-    """Deponun durumunu tek bir Baglam nesnesinde toplar. Salt-okunur."""
-    ctx = Baglam(depo=os.path.abspath(depo))
+def collect(repo: str = ".") -> Context:
+    """Collect the repository's state into one Context. Read-only."""
+    ctx = Context(repo=os.path.abspath(repo))
 
-    git_dir, _, rc = _git(depo, "rev-parse", "--absolute-git-dir")
+    git_dir, _, rc = _git(repo, "rev-parse", "--absolute-git-dir")
     if rc != 0:
-        return ctx  # git deposu degil; gecerli_depo False kalir
-    ctx.gecerli_depo = True
+        return ctx  # not a git repository; is_repo stays False
+    ctx.is_repo = True
     ctx.git_dir = git_dir.strip()
 
-    durum, _, _ = _git(depo, "status", "--porcelain=v2", "--branch")
-    _durum_ayristir(ctx, durum)
+    status, _, _ = _git(repo, "status", "--porcelain=v2", "--branch")
+    _parse_status(ctx, status)
 
-    ctx.surmekte = [
-        ad for ad in SURMEKTE_YOLLARI
-        if os.path.exists(os.path.join(ctx.git_dir, ad))
+    ctx.in_progress = [
+        name for name in IN_PROGRESS_PATHS
+        if os.path.exists(os.path.join(ctx.git_dir, name))
     ]
 
-    sahne, _, _ = _git(depo, "diff", "--cached", "--name-only")
-    ctx.sahnelenen = [y for y in sahne.splitlines() if y.strip()]
-    # 200 yol siniri: dev bir ilk commit'te binlerce yol olabilir, tek
-    # check-ignore cagrisini sisirmenin bir faydasi yok.
-    ctx.ignore_edilen = ignore_edilenler(depo, ctx.sahnelenen[:200])
+    staged, _, _ = _git(repo, "diff", "--cached", "--name-only")
+    ctx.staged = [p for p in staged.splitlines() if p.strip()]
+    # 200-path cap: a huge first commit can hold thousands of paths and there
+    # is nothing to gain from inflating the single check-ignore call.
+    ctx.ignored_staged = ignored_paths(repo, ctx.staged[:200])
 
-    remote, _, _ = _git(depo, "remote")
-    ctx.remoteler = [r for r in remote.splitlines() if r.strip()]
-    ctx.remote_var = bool(ctx.remoteler)
+    remotes, _, _ = _git(repo, "remote")
+    ctx.remotes = [r for r in remotes.splitlines() if r.strip()]
+    ctx.has_remote = bool(ctx.remotes)
 
-    mesaj, _, rc = _git(depo, "log", "-1", "--format=%s")
-    ctx.son_mesaj = mesaj.strip() if rc == 0 else None
+    subject, _, rc = _git(repo, "log", "-1", "--format=%s")
+    ctx.last_subject = subject.strip() if rc == 0 else None
 
-    eposta, _, rc = _git(depo, "config", "user.email")
-    ctx.user_email = eposta.strip() if rc == 0 and eposta.strip() else None
+    email, _, rc = _git(repo, "config", "user.email")
+    ctx.user_email = email.strip() if rc == 0 and email.strip() else None
 
-    ctx.kayip = kayip_commitler(depo)
+    ctx.lost = lost_commits(repo)
 
     return ctx
 
 
-def ignore_ediliyor(depo: str, yol: str) -> bool:
-    """`git check-ignore` ile tek bir yolun ignore edilip edilmedigini sorar.
+def is_ignored(repo: str, path: str) -> bool:
+    """Ask `git check-ignore` whether a single path is ignored.
 
-    exit 0 = ignore ediliyor, 1 = edilmiyor.
+    Exit 0 = ignored, 1 = not ignored.
     """
-    _, _, rc = _git(depo, "check-ignore", "-q", "--no-index", yol)
+    _, _, rc = _git(repo, "check-ignore", "-q", "--no-index", path)
     return rc == 0
 
 
-def ignore_edilenler(depo: str, yollar: List[str]) -> List[str]:
-    """Verilen yollardan .gitignore kurallarina takilanlari dondurur.
+def ignored_paths(repo: str, paths: List[str]) -> List[str]:
+    """Return those paths that .gitignore rules match.
 
-    --no-index SART: check-ignore varsayilan olarak index'e bakar ve
-    index'te olan (yani sahnelenmis) bir yolu, kural eslesse bile "ignore
-    edilmiyor" sayar. Senaryo 9 ve 10 tam olarak sahnelenmis yollari
-    sorguluyor, o yuzden bu bayrak olmadan sonuc her zaman bos cikar.
+    --no-index is REQUIRED: by default check-ignore consults the index and
+    reports a path that is in it (i.e. staged) as "not ignored" even when a
+    rule matches. Scenarios 9 and 10 ask about exactly the staged paths, so
+    without this flag the answer is always empty.
 
-    Tek cagri, --stdin ile. Salt-okunur.
+    One call, via --stdin. Read-only.
     """
-    yollar = [y for y in yollar if y.strip()]
-    if not yollar:
+    paths = [p for p in paths if p.strip()]
+    if not paths:
         return []
     try:
         p = subprocess.run(
-            ["git", "-C", depo, "check-ignore", "--no-index", "--stdin"],
-            input="\n".join(yollar).encode("utf-8"),
+            ["git", "-C", repo, "check-ignore", "--no-index", "--stdin"],
+            input="\n".join(paths).encode("utf-8"),
             capture_output=True,
-            env=_ortam(),
+            env=_env(),
         )
     except FileNotFoundError:
         return []
-    if p.returncode not in (0, 1):   # 128 = hata; sessizce bos don
+    if p.returncode not in (0, 1):   # 128 = error; stay quiet
         return []
-    cikti = p.stdout.decode("utf-8", "replace")
-    return [y for y in cikti.splitlines() if y.strip()]
+    out = p.stdout.decode("utf-8", "replace")
+    return [p for p in out.splitlines() if p.strip()]
 
 
-def reflog(depo: str, adet: int = 30) -> List[str]:
-    """Okunabilir reflog satirlari. Salt-okunur."""
-    cikti, _, rc = _git(depo, "reflog", "--date=relative", "-%d" % adet)
+def reflog(repo: str, count: int = 30) -> List[str]:
+    """Human-readable reflog lines. Read-only."""
+    out, _, rc = _git(repo, "reflog", "--date=relative", "-%d" % count)
     if rc != 0:
         return []
-    return [s for s in cikti.splitlines() if s.strip()]
+    return [line for line in out.splitlines() if line.strip()]
 
 
-def erisilemezler(depo: str, shalar: List[str]) -> Set[str]:
-    """Verilen commit'lerden hicbir ref'ten erisilemeyenleri dondurur.
+def unreachable(repo: str, shas: List[str]) -> Set[str]:
+    """Return those commits that no ref can reach.
 
-    `rev-list --no-walk <shalar> --not --all`: --no-walk atalara inmez,
-    `--not --all` ref'lerden erisilen her seyi disarida birakir. Geriye
-    yalnizca hicbir branch/tag/HEAD'den ulasilamayan commit'ler kalir.
-    Tek cagri, siniri yok. Salt-okunur.
+    `rev-list --no-walk <shas> --not --all`: --no-walk does not descend into
+    ancestors, and `--not --all` excludes everything reachable from any ref.
+    What remains is exactly the commits no branch, tag or HEAD points at.
+    One call, no cap. Read-only.
     """
-    if not shalar:
+    if not shas:
         return set()
-    cikti, _, rc = _git(depo, "rev-list", "--no-walk", *(list(shalar) + ["--not", "--all"]))
+    out, _, rc = _git(repo, "rev-list", "--no-walk", *(list(shas) + ["--not", "--all"]))
     if rc != 0:
         return set()
-    return {s.strip() for s in cikti.splitlines() if s.strip()}
+    return {s.strip() for s in out.splitlines() if s.strip()}
 
 
-def kayip_commitler(depo: str, adet: int = 10) -> List[Tuple[str, str, str]]:
-    """Reflog'un son `adet` girdisinde olup hicbir ref'ten erisilemeyenler.
+def lost_commits(repo: str, count: int = 10) -> List[Tuple[str, str, str]]:
+    """Commits in the last `count` reflog entries that no ref can reach.
 
-    Iki sinir bilerek konuldu:
+    Two limits, both deliberate:
 
-    1. Yalnizca son 10 girdi. Reflog yuzlerce girdi tutuyor ve aylar once
-       dusmus bir commit'i bugun "kaybettin" diye bildirmek gurultu olur.
-       `gitwhy doctor` tam reflog'u gostermek icin var.
-    2. Bir ustteki (daha yeni) islem `commit (amend)` ise atlanir: amend
-       eski commit'i erisilemez birakir ama bu kasitli bir islemdir, kayip
-       degil. Fixture ile dogrulandi (neg_amend).
+    1. Only the last 10 entries. A reflog holds hundreds, and reporting a
+       commit dropped months ago as "you lost this" is noise. `gitwhy doctor`
+       exists to show the full reflog.
+    2. Skipped when the entry above (the newer one) is `commit (amend)`:
+       amending leaves the old commit unreachable, but that is deliberate,
+       not a loss. Verified by the neg_amend fixture.
     """
-    cikti, _, rc = _git(depo, "reflog", "--format=%H%x09%gs%x09%s", "-%d" % adet)
+    out, _, rc = _git(repo, "reflog", "--format=%H%x09%gs%x09%s", "-%d" % count)
     if rc != 0:
         return []
-    girdiler: List[Tuple[str, str, str]] = []
-    for satir in cikti.splitlines():
-        alan = satir.split("\t")
-        if len(alan) >= 3 and alan[0].strip():
-            girdiler.append((alan[0].strip(), alan[1], alan[2]))
+    entries: List[Tuple[str, str, str]] = []
+    for line in out.splitlines():
+        fields = line.split("\t")
+        if len(fields) >= 3 and fields[0].strip():
+            entries.append((fields[0].strip(), fields[1], fields[2]))
 
-    adaylar: List[Tuple[str, str, str]] = []
-    gorulen = set()
-    for i, (sha, _gs, konu) in enumerate(girdiler):
-        if i > 0 and girdiler[i - 1][1].startswith("commit (amend)"):
+    candidates: List[Tuple[str, str, str]] = []
+    seen = set()
+    for i, (sha, _reflog_subject, subject) in enumerate(entries):
+        if i > 0 and entries[i - 1][1].startswith("commit (amend)"):
             continue
-        if sha in gorulen:
+        if sha in seen:
             continue
-        gorulen.add(sha)
-        sonraki = girdiler[i - 1][1] if i > 0 else "(en son islem)"
-        adaylar.append((sha, konu, sonraki))
+        seen.add(sha)
+        next_op = entries[i - 1][1] if i > 0 else "(most recent operation)"
+        candidates.append((sha, subject, next_op))
 
-    kayip_set = erisilemezler(depo, [a[0] for a in adaylar])
-    return [a for a in adaylar if a[0] in kayip_set]
+    lost = unreachable(repo, [c[0] for c in candidates])
+    return [c for c in candidates if c[0] in lost]

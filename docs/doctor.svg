@@ -1,16 +1,16 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="712" height="292" viewBox="0 0 712 292" role="img" aria-label="gitwhy doctor ciktisi">
-<rect width="712" height="292" rx="8" fill="#0d1117"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="729" height="292" viewBox="0 0 729 292" role="img" aria-label="gitwhy doctor output">
+<rect width="729" height="292" rx="8" fill="#0d1117"/>
 <g font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="14">
-<text x="16.0" y="30.0" fill="#79c0ff" xml:space="preserve"># gitwhy doctor — C:\Users\Dorsay\AppData\Local\Temp\gitwhy_doctor_co0ryzof\proje</text>
-<text x="16.0" y="70.0" fill="#c9d1d9" xml:space="preserve">branch            : main</text>
-<text x="16.0" y="90.0" fill="#c9d1d9" xml:space="preserve">upstream          : yok</text>
-<text x="16.0" y="110.0" fill="#c9d1d9" xml:space="preserve">ileri / geri      : +0 / -0</text>
-<text x="16.0" y="130.0" fill="#c9d1d9" xml:space="preserve">remote            : yok</text>
-<text x="16.0" y="150.0" fill="#c9d1d9" xml:space="preserve">surmekte islem    : yok</text>
-<text x="16.0" y="170.0" fill="#c9d1d9" xml:space="preserve">cakisan dosya     : 0</text>
-<text x="16.0" y="190.0" fill="#c9d1d9" xml:space="preserve">kaydedilmemis     : 1</text>
-<text x="16.0" y="210.0" fill="#f85149" xml:space="preserve">erisilemez commit : 734c9da5 (gece boyu yazilan rapor)</text>
-<text x="16.0" y="230.0" fill="#f85149" xml:space="preserve">user.email        : TANIMLI DEGIL</text>
-<text x="16.0" y="250.0" fill="#f85149" xml:space="preserve">.gitignore        : YOK</text>
-<text x="16.0" y="270.0" fill="#f85149" xml:space="preserve">sahnelenmis sir   : .env</text>
+<text x="16.0" y="30.0" fill="#79c0ff" xml:space="preserve"># gitwhy doctor — C:\Users\Dorsay\AppData\Local\Temp\gitwhy_doctor_0loqtb5h\project</text>
+<text x="16.0" y="70.0" fill="#c9d1d9" xml:space="preserve">branch             : main</text>
+<text x="16.0" y="90.0" fill="#c9d1d9" xml:space="preserve">upstream           : none</text>
+<text x="16.0" y="110.0" fill="#c9d1d9" xml:space="preserve">ahead / behind     : +0 / -0</text>
+<text x="16.0" y="130.0" fill="#c9d1d9" xml:space="preserve">remote             : none</text>
+<text x="16.0" y="150.0" fill="#c9d1d9" xml:space="preserve">operation running  : none</text>
+<text x="16.0" y="170.0" fill="#c9d1d9" xml:space="preserve">conflicted files   : 0</text>
+<text x="16.0" y="190.0" fill="#c9d1d9" xml:space="preserve">unstaged changes   : 1</text>
+<text x="16.0" y="210.0" fill="#f85149" xml:space="preserve">unreachable commits: 1f3e29e0 (the report written overnight)</text>
+<text x="16.0" y="230.0" fill="#f85149" xml:space="preserve">user.email         : NOT SET</text>
+<text x="16.0" y="250.0" fill="#f85149" xml:space="preserve">.gitignore         : MISSING</text>
+<text x="16.0" y="270.0" fill="#f85149" xml:space="preserve">staged secrets     : .env</text>
 </g></svg>
