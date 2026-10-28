@@ -17,7 +17,7 @@ import os
 import subprocess
 import sys
 
-from . import __version__, capture, context, explain, rules
+from . import __version__, ai, capture, context, explain, rules
 
 # The wrapper does the same job in both shells; the only difference is how the
 # pipeline's exit code is read: ${PIPESTATUS[0]} in bash, ${pipestatus[1]} in
@@ -60,6 +60,17 @@ WRAPPER = {
 }
 
 
+def _add_ai_flags(parser) -> None:
+    """The optional LLM mode. Off by default: the template mode needs no
+    network and no key, and the scenario decision never depends on the LLM."""
+    parser.add_argument(
+        "--ai", action="store_true",
+        help="rewrite the explanation with an LLM (needs ANTHROPIC_API_KEY)")
+    parser.add_argument(
+        "--level", default="beginner", choices=["beginner", "normal"],
+        help="who the --ai rewrite is for (default: beginner)")
+
+
 def _out(text: str) -> None:
     """Print without blowing up on a Windows console that is not UTF-8."""
     try:
@@ -69,10 +80,24 @@ def _out(text: str) -> None:
         sys.stdout.write(text.encode(encoding, "replace").decode(encoding) + "\n")
 
 
-def _explain(repo: str, error_text: str, command: str = None) -> int:
+def _render(scenario, ctx, arg) -> str:
+    """Produce the text to show, applying AI mode when asked for.
+
+    The scenario was already chosen deterministically; AI mode only rewrites
+    the prose, and ai.rewrite falls back to the template whenever the answer
+    cannot be trusted.
+    """
+    text = explain.explain(scenario, ctx)
+    if not getattr(arg, "ai", False) or scenario is None:
+        return text
+    rewritten, note = ai.rewrite(text, getattr(arg, "level", "beginner"))
+    return rewritten if note is None else rewritten + "\n\n" + note
+
+
+def _explain(repo: str, error_text: str, command: str = None, arg=None) -> int:
     ctx = context.collect(repo)
     scenario = rules.match(ctx, error_text, command)
-    _out(explain.explain(scenario, ctx))
+    _out(_render(scenario, ctx, arg))
     return 0 if scenario else 1
 
 
@@ -90,7 +115,7 @@ def cmd_last_error(arg) -> int:
             "No recorded error. Looking at the repository's current state.\n"
             "To explain a specific error:  gitwhy explain --stderr -\n"
         )
-    _out(explain.explain(scenario, ctx))
+    _out(_render(scenario, ctx, arg))
     return 0 if scenario else 1
 
 
@@ -100,7 +125,7 @@ def cmd_explain(arg) -> int:
     else:
         with open(arg.stderr, encoding="utf-8", errors="replace") as f:
             text = f.read()
-    return _explain(arg.repo, text)
+    return _explain(arg.repo, text, None, arg)
 
 
 def cmd_capture(arg) -> int:
@@ -117,7 +142,7 @@ def cmd_capture(arg) -> int:
         return 0
     capture.write(" ".join(arg.command), p.returncode, out, err, arg.repo)
     _out("")
-    _explain(arg.repo, err + "\n" + out, " ".join(arg.command))
+    _explain(arg.repo, err + "\n" + out, " ".join(arg.command), arg)
     return p.returncode
 
 
@@ -189,16 +214,19 @@ def main(argv=None) -> int:
     )
     parser.add_argument("--version", action="version", version="gitwhy " + __version__)
     parser.add_argument("--repo", default=".", help="repository to inspect (default: .)")
+    _add_ai_flags(parser)
     sub = parser.add_subparsers(dest="subcommand")
 
     p = sub.add_parser("explain", help="explain the given error output")
     p.add_argument("--stderr", required=True, help="error output file, - = stdin")
     p.add_argument("--repo", default=".")
+    _add_ai_flags(p)
     p.set_defaults(func=cmd_explain)
 
     p = sub.add_parser("capture", help="run a command and explain it if it fails")
     p.add_argument("command", nargs=argparse.REMAINDER)
     p.add_argument("--repo", default=".")
+    _add_ai_flags(p)
     p.set_defaults(func=cmd_capture)
 
     p = sub.add_parser("capture-exit", help="record written by the shell wrapper")

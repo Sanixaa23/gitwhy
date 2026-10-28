@@ -7,8 +7,8 @@ The matching is deterministic, not an LLM; it works with no network. It never ru
 destructive commands for you, it only shows them and says what they delete. Measured
 scenario accuracy is in the table below.
 
-> **Status:** all 12 scenarios work, measured with 18 fixtures. Not built yet: the `--ai`
-> mode.
+> **Status:** all 12 scenarios work, measured with 18 fixtures. 37 tests, no runtime
+> dependencies.
 
 ![gitwhy: a rebase conflict, the explanation, the fix](docs/demo.gif)
 
@@ -65,6 +65,7 @@ gitwhy explain --stderr err.txt  # explain the given error output (- = stdin)
 gitwhy capture -- git push       # run the command, explain it if it fails
 gitwhy doctor                    # repo health: upstream, user.email, staged secrets
 gitwhy shell-init bash           # wrapper that fires automatically when git fails
+gitwhy --ai                      # rewrite the explanation with an LLM (optional)
 ```
 
 `gitwhy doctor` lists a repository's problems at a glance; the red lines are the ones to
@@ -112,6 +113,27 @@ real git failures; CI runs that under both bash and zsh, in both modes:
 bash tools/wrapper_test.sh
 GITWHY_TEE=1 bash tools/wrapper_test.sh
 ```
+
+### AI mode (optional, off by default)
+
+```bash
+export ANTHROPIC_API_KEY=sk-...
+gitwhy --ai                 # or: gitwhy --ai --level normal
+```
+
+**The LLM does not make the decision.** By the time it runs, the scenario has already
+been matched deterministically and the explanation already exists; the model only
+rewrites that text for the reader's level. If there is no key, no network, or the request
+fails, you get the template and a one-line note saying so.
+
+The rewrite is then **vetted before it is shown**. The answer is thrown away, and the
+template shown instead, if it introduces a destructive command that was not in the
+original, drops the warning from one that stayed, or waters a warning down so it no
+longer says what gets deleted. `tests/test_ai.py` tests that gate against every command
+in `DESTRUCTIVE_COMMANDS`, with no network involved.
+
+This is the answer to "did you just ask an LLM?": no — the matching is deterministic, the
+LLM only rewrites the prose, and it cannot talk you into running something dangerous.
 
 ## Scenarios
 
@@ -190,6 +212,7 @@ capture.py   records / reads the last failed command
 context.py   read-only git queries -> a single Context object
 rules.py     (context, error text, command) -> scenario id. Pure, no I/O, no LLM
 explain.py   scenario id + context -> text, from the scenarios/*.md templates
+ai.py        optional: rewrites that text, and vets the answer before showing it
 cli.py       argparse, 5 subcommands
 ```
 
