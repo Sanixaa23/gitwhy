@@ -283,6 +283,20 @@ trade-off, and coverage went from 7/12 to 10/12. A recorded command is accepted 
 the same repository and the last 10 minutes, so a stale record is never mistaken for the
 answer to today's command.
 
+## Repository map
+
+| Path | What it is |
+|---|---|
+| [src/gitwhy/context.py](src/gitwhy/context.py) | read-only state collector |
+| [src/gitwhy/rules.py](src/gitwhy/rules.py) | the pure matcher: state, text and command in, scenario id out |
+| [src/gitwhy/explain.py](src/gitwhy/explain.py) | template filling, plus the destructive-command rules |
+| [src/gitwhy/scenarios/](src/gitwhy/scenarios) | the 12 hand-written templates |
+| [tests/fixtures.py](tests/fixtures.py) | builds a real broken repository per scenario |
+| [tools/video_setup.py](tools/video_setup.py) | builds the three demo repositories |
+| [docs/VIDEO.md](docs/VIDEO.md) | the 2:20 demo shot list |
+| [docs/DEVPOST.md](docs/DEVPOST.md) | submission draft |
+| [docs/SOURCEHACKS.md](docs/SOURCEHACKS.md) | the event's rules, verified from the official listing |
+
 ## Reproducing the demo recording
 
 The GIF and the images live in the repository; there are two ways to change them.

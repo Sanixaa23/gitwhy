@@ -1,8 +1,19 @@
 # Devpost submission draft
 
-Paste each section into the matching Devpost field. Replace `Sanixaa23` with your
-GitHub username before submitting, and check the event's prize list for a
-developer-tools or education track to enter as well.
+Paste each section into the matching Devpost field. Replace `Sanixaa23` with
+your GitHub username before submitting.
+
+**SourceHacks has no tracks** — it is theme-free, and the only awards are 1st,
+2nd and 3rd overall. There is nothing to enter besides the main submission.
+The five judging criteria, the prizes and the submission requirements are
+recorded, verbatim from the official listing, in `SOURCEHACKS.md`. Read the
+"Two rules that change our plans" section there before you submit: the video
+has a two-minute minimum, and the rules say the implementation should be
+completed during the 24-hour event.
+
+Sections below are written against the five criteria. `## Design and user
+experience` is the one judges will not see from a terminal recording alone,
+so do not drop it.
 
 ---
 
@@ -105,6 +116,33 @@ progress bars, so instead we fed the *failed command* to the rules — `git push
 plus no remote is scenario 5 without reading a single character of the error.
 Coverage went from 7/12 to 10/12 with no trade-off.
 
+## Design and user experience
+
+The interface is a terminal, so every design decision is about reading speed.
+
+The answer is always the same three headings in the same order — **What
+happened**, **Where you are**, **What to do** — because someone who has hit
+this error twice should be able to find the command without reading the prose
+again. The first is one sentence. The second is a list of facts about *your*
+repository, not a tutorial. The third is a copyable command with your branch
+name already substituted, so nothing has to be edited before it is pasted.
+
+Four more choices, each of which we got wrong first:
+
+- **Destructive commands are printed, never run.** The reader stays the one
+  who decides. A warning line says what the command deletes, in those words.
+- **One scenario per answer.** An early version printed every rule that
+  matched. It was complete and unreadable.
+- **The wrapper means you type nothing.** When git fails, the explanation is
+  already on screen. The faster path is no command at all.
+- **No colour as the only signal, no box drawing, no spinner.** It has to
+  survive a pipe, a log file, a screen reader and a narrow terminal. `gitwhy
+  doctor` is the one view that renders findings as a list, and it degrades to
+  plain text.
+
+Accessibility is why the output is markdown: it is the format that reads the
+same in a terminal, in a pasted GitHub comment and out loud.
+
 ## Accomplishments we're proud of
 
 - A number we can defend: 18/18, with the negative controls included.
@@ -138,7 +176,7 @@ fixture, a rule and a template, in that order.
 
 ## Built With
 
-python, git, github-actions, pytest, pillow, asciinema, anthropic-api
+python, git, github-actions, pytest, pillow, anthropic-api
 
 ## Try it out
 
