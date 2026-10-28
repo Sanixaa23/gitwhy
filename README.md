@@ -21,10 +21,10 @@ was written by hand.
 One line, no dependencies:
 
 ```bash
-pipx install git+https://github.com/<user>/gitwhy
+pipx install git+https://github.com/Sanixaa23/gitwhy
 ```
 
-Without pipx, `pip install git+https://github.com/<user>/gitwhy` works too; pipx is
+Without pipx, `pip install git+https://github.com/Sanixaa23/gitwhy` works too; pipx is
 preferred because it installs the tool into its own environment.
 
 Check the install:
@@ -41,7 +41,7 @@ account, no configuration.
 From source, for development:
 
 ```bash
-git clone https://github.com/<user>/gitwhy
+git clone https://github.com/Sanixaa23/gitwhy
 cd gitwhy
 pip install -e ".[dev]"
 python -m pytest -q

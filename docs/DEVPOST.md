@@ -1,6 +1,6 @@
 # Devpost submission draft
 
-Paste each section into the matching Devpost field. Replace `<user>` with your
+Paste each section into the matching Devpost field. Replace `Sanixaa23` with your
 GitHub username before submitting, and check the event's prize list for a
 developer-tools or education track to enter as well.
 
@@ -143,6 +143,6 @@ python, git, github-actions, pytest, pillow, asciinema, anthropic-api
 ## Try it out
 
 ```
-pipx install git+https://github.com/<user>/gitwhy
+pipx install git+https://github.com/Sanixaa23/gitwhy
 gitwhy doctor
 ```

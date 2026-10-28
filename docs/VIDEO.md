@@ -92,7 +92,7 @@ away and you get the template."
 
 ## 1:22–1:30 — Close
 
-**Screen:** `pipx install git+https://github.com/<user>/gitwhy`, then
+**Screen:** `pipx install git+https://github.com/Sanixaa23/gitwhy`, then
 `gitwhy doctor` on a repository with findings.
 
 **Say:** "One line to install, no dependencies, works offline. Twelve scenarios,
