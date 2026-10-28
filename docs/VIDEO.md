@@ -6,32 +6,44 @@ same as the GIF. Speak over it; do not read the screen aloud.
 Only 16% of the award-winning projects we sampled had a video at all, so this
 is close to free marks — but only if it is short and shows the thing working.
 
-**Before recording:** `pip install -e .`, check `gitwhy --version`, and set
-`GIT_CONFIG_GLOBAL` to a non-existent path so your own git config stays out of
-the frame. Three temporary repositories, built ahead of time, one per scenario.
+**Before recording:** run `python tools/video_setup.py`, which builds the three
+repositories in `~/gitwhy-video/` and leaves each one a single command away
+from the failure you want on camera. Check `gitwhy --version` first
+(`pip install -e .`).
+
+**Record in Git Bash, WSL or zsh — not PowerShell.** The shell wrapper supports
+bash and zsh only, and take 1 needs it. Install it once in the recording shell:
+
+```bash
+eval "$(gitwhy shell-init bash)"
+```
+
+Take 1 depends on the wrapper because scenario 5 is found from the *failed
+command*. A bare `gitwhy` typed after a failed push has no way to know you ran
+push: there is no record and no error text, and "no remote configured" is not a
+scenario by itself — a local-only repository is a normal thing to have, which
+is exactly why the `neg_clean` fixture must not match. Without the wrapper,
+take 1 becomes `gitwhy capture -- git push`. Takes 2 and 3 work either way: a
+half-finished rebase and a staged `.env` are visible in the repository's state.
 
 ---
 
-## 0:00–0:08 — The problem, in one real error
+## 0:00–0:20 — The problem and the answer, in one take
 
-**Screen:** a terminal. Run `git push` in a fresh repo. Git prints
-`fatal: No configured push destination.` followed by five lines of advice.
+**Screen:** `cd ~/gitwhy-video/01-first-push`, then `git push`. Git prints
+`fatal: No configured push destination.` and five lines of advice — then, with
+no further typing, gitwhy's explanation appears underneath it.
 
-**Say:** "This is what git says when a beginner's first push fails. It is
-correct, and it is useless if you do not already know what a remote is."
+**Say, over the git error:** "This is what git says when a beginner's first
+push fails. It is correct, and it is useless if you do not already know what a
+remote is."
 
-Do not explain the project yet. Show the pain first.
+**Say, as gitwhy's output appears:** "We did not type anything. The wrapper
+noticed git failed, and gitwhy read the repository: no remote is configured. So
+it says that in plain words and gives the two commands for this repository,
+with the branch name already filled in."
 
----
-
-## 0:08–0:20 — What gitwhy answers
-
-**Screen:** type `gitwhy`. The scenario-5 explanation fills the screen: what
-happened, where you are, the two commands to run.
-
-**Say:** "gitwhy reads the repository, not the error message. No remote is
-configured, so it tells you that in plain words and gives you the two commands
-for this repository, with your branch name already in them."
+Do not describe the project before the error. Show the pain first.
 
 ---
 
