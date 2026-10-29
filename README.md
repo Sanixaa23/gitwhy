@@ -18,11 +18,12 @@ was written by hand.
 
 ### Demo video — 3 minutes
 
-<video src="https://github.com/Sanixaa23/gitwhy/raw/main/docs/gitwhy-demo.mp4" controls muted preload="metadata" width="100%"></video>
+[![The first failed push: git's error, then gitwhy's answer with nothing typed](docs/demo-video.gif)](https://github.com/Sanixaa23/gitwhy/releases/download/v0.1.0/gitwhy-demo.mp4)
 
-If the player above does not load, the file is
-[in the repository](docs/gitwhy-demo.mp4) and attached to
-[the v0.1.0 release](https://github.com/Sanixaa23/gitwhy/releases/tag/v0.1.0).
+Above is the opening beat — `git push` fails, and the explanation appears underneath
+with nothing else typed. **[Watch the full 3 minutes](https://github.com/Sanixaa23/gitwhy/releases/download/v0.1.0/gitwhy-demo.mp4)**
+(also [in the repository](docs/gitwhy-demo.mp4), and on
+[the v0.1.0 release](https://github.com/Sanixaa23/gitwhy/releases/tag/v0.1.0)).
 
 It covers the first failed push, a rebase conflict and the scenario-ordering rule, a
 staged `.env`, the two modules the design rests on, the accuracy matrix, the safety
