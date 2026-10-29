@@ -567,9 +567,17 @@ def build_audio(takes: Sequence["Take"], clips: Sequence[Optional[str]],
 
 
 def mux(video: str, wav: str, out: str) -> None:
-    """Join the rendered picture to the narration track."""
+    """Join the rendered picture to the narration track, at a sane loudness.
+
+    loudnorm takes the track to -16 LUFS, which is roughly what streaming
+    platforms target. Straight out of the generator the narration sat at
+    -27 dB mean, which plays as "there is no sound" on laptop speakers with
+    the volume halfway up -- quiet enough that the first reaction to the
+    video was that it had no audio at all.
+    """
     import subprocess
     subprocess.run([ffmpeg(), "-y", "-v", "error", "-i", video, "-i", wav,
+                    "-af", "loudnorm=I=-16:TP=-1.5:LRA=11",
                     "-c:v", "copy", "-c:a", "aac", "-b:a", "160k",
                     "-shortest", out], check=True)
 

@@ -18,12 +18,18 @@ was written by hand.
 
 ### Demo video — 3 minutes
 
-[![The first failed push: git's error, then gitwhy's answer with nothing typed](docs/demo-video.gif)](https://github.com/Sanixaa23/gitwhy/releases/download/v0.1.0/gitwhy-demo.mp4)
+[![The first failed push: git's error, then gitwhy's answer with nothing typed](docs/demo-video.gif)](https://github.com/Sanixaa23/gitwhy/blob/main/docs/gitwhy-demo.mp4)
 
-Above is the opening beat — `git push` fails, and the explanation appears underneath
-with nothing else typed. **[Watch the full 3 minutes](https://github.com/Sanixaa23/gitwhy/releases/download/v0.1.0/gitwhy-demo.mp4)**
-(also [in the repository](docs/gitwhy-demo.mp4), and on
-[the v0.1.0 release](https://github.com/Sanixaa23/gitwhy/releases/tag/v0.1.0)).
+### ▶ [Watch the full 3 minutes, with narration](https://github.com/Sanixaa23/gitwhy/blob/main/docs/gitwhy-demo.mp4)
+
+The moving image above is a **silent 12-second preview** — it is a GIF, and a GIF
+cannot carry audio. The full video is narrated; click the link above and GitHub plays
+it with sound. It is also [attached to the v0.1.0
+release](https://github.com/Sanixaa23/gitwhy/releases/tag/v0.1.0) if you would rather
+download it.
+
+That preview is the opening beat: `git push` fails, git's error sits there, and the
+explanation appears underneath with nothing else typed.
 
 It covers the first failed push, a rebase conflict and the scenario-ordering rule, a
 staged `.env`, the two modules the design rests on, the accuracy matrix, the safety
