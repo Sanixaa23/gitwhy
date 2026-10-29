@@ -7,7 +7,7 @@ The matching is deterministic, not an LLM; it works with no network. It never ru
 destructive commands for you, it only shows them and says what they delete. Measured
 scenario accuracy is in the table below.
 
-> **Status:** all 12 scenarios work, measured with 18 fixtures. 37 tests, no runtime
+> **Status:** all 12 scenarios work, measured with 18 fixtures. 39 tests, no runtime
 > dependencies.
 
 ![gitwhy: a rebase conflict, the explanation, the fix](docs/demo.gif)
@@ -15,6 +15,25 @@ scenario accuracy is in the table below.
 Every frame above is real output — `python tools/demo.py` puts a temporary repository
 into a broken state, actually runs the commands, and draws the bytes it captured. No line
 was written by hand.
+
+### Demo video — 3 minutes
+
+<video src="https://github.com/Sanixaa23/gitwhy/raw/main/docs/gitwhy-demo.mp4" controls muted preload="metadata" width="100%"></video>
+
+If the player above does not load, the file is
+[in the repository](docs/gitwhy-demo.mp4) and attached to
+[the v0.1.0 release](https://github.com/Sanixaa23/gitwhy/releases/tag/v0.1.0).
+
+It covers the first failed push, a rebase conflict and the scenario-ordering rule, a
+staged `.env`, the two modules the design rests on, the accuracy matrix, the safety
+suite, and the install. The same rule as the GIF applies and is the reason the video
+exists in this form: every character on screen came out of `tools/video_capture.sh`
+running the real commands against real repositories, and `tools/video_render.py` only
+draws those files. It is drawn rather than screen-recorded, which is a different thing
+from faked — nothing was typed into a transcript by hand. The narration is synthetic
+(ElevenLabs), generated from the script in [docs/CUE-SHEET.md](docs/CUE-SHEET.md), and
+it decides the cut: each segment's picture lasts exactly as long as its line, so
+re-generating one line re-times both sides.
 
 ## Install
 
