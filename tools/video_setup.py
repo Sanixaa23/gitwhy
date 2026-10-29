@@ -163,8 +163,8 @@ def main():
 
     print("Before recording:")
     print("  - check `gitwhy --version` (pip install -e .)")
-    print("  - 96x36 terminal, same as the GIF")
-    print("  - shot list: docs/VIDEO.md")
+    print("  - 96x48 terminal, NOT the GIF's 96x36: the takes need 38-46 rows")
+    print("  - shot list: docs/VIDEO.md, operator card: docs/CUE-SHEET.md")
     print("  - take 1 needs the wrapper; takes 2 and 3 work either way,")
     print("    because a half-finished rebase and a staged .env are visible")
     print("    in the repository's state. Without the wrapper, take 1 is")

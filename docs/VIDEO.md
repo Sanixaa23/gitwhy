@@ -5,16 +5,39 @@ requirement, not a style note: see `SOURCEHACKS.md`. An earlier version of
 this file was a 90-second cut, which would have been rejected. Do not trim
 below 2:00 to tighten the pacing — if a segment drags, say less over it.
 
-One take per segment, no cuts inside a segment. Record the terminal at 96x36,
-same as the GIF. Speak over it; do not read the screen aloud.
+One take per segment, no cuts inside a segment. Speak over it; do not read the
+screen aloud.
+
+**Record the terminal at 96x48, not the GIF's 96x36.** Measured from the real
+output: take 1 needs 38 rows, take 2 needs 42, take 3 needs 46. At 36 rows all
+three scroll, and take 1 loses the thing the segment exists to show — the git
+error has to still be on screen when gitwhy's answer lands under it. 96 columns
+is correct and unchanged; the widest line any take produces is 89.
+
+At 48 rows nothing scrolls in any take, so there is no scroll cue anywhere in
+this file. The `> WARNING:` block is the last output in takes 2 and 3, so it
+sits at the bottom of the frame on its own.
+
+Line height is 1080/48 ≈ 22px at 1080p, which is legible but tight. Record at
+1440p if the screen allows: ≈30px, and it downscales cleanly.
 
 Only 16% of the award-winning projects we sampled had a video at all, so the
 video is close to free marks — but only if it shows the thing working.
 
-**Before recording:** run `python tools/video_setup.py`, which builds the
-three repositories in `~/gitwhy-video/` and leaves each one a single command
+**Before recording:** run `python tools/video_setup.py --reset`, which builds
+the three repositories in `~/gitwhy-video/` and leaves each one a single command
 away from the failure you want on camera. Check `gitwhy --version` first
 (`pip install -e .`).
+
+Use `--reset` every time, including between takes. Each take consumes the state
+it demonstrates: once `git rebase main` has run, repo 2 is already mid-rebase, and
+once `git add .` has run, repo 3 is already staged. A rehearsal leaves all three
+spent, so a second take of anything starts from the wrong state unless you reset.
+`--reset` refuses to touch a directory that lacks the `.gitwhy-video` marker it
+wrote, so it cannot eat a real repository of yours.
+
+Nothing else needs cleaning up: the three repositories have no remote, so no
+take can reach the network or push anything anywhere.
 
 **Record in Git Bash, WSL or zsh — not PowerShell.** The shell wrapper
 supports bash and zsh only, and take 1 needs it. Install it once in the
@@ -64,8 +87,14 @@ same time. A tool that checks detached HEAD first tells you to create a branch �
 exactly the wrong move. We check the in-progress operation first, and a test
 enforces that order."
 
-**Screen while talking:** scroll to the `## Where you are` block so
-`Operation in progress: rebase-merge` is visible.
+**Screen while talking:** nothing to do. At 96x48 the whole take is one frame,
+with `Operation in progress: rebase-merge` on row 20 and the destructive-command
+warning at the bottom. Point at row 20 if you are using a cursor.
+
+Note the wrapper fires here too, because the rebase *fails* — so gitwhy's answer
+appears without you typing, exactly as in take 1. You can let that happen and say
+so, or type `gitwhy` yourself to show the manual form. Pick one before you roll;
+do not discover it on camera.
 
 ---
 
@@ -77,7 +106,13 @@ enforces that order."
 history second, because a pushed key is already out of your hands. And note
 what it does not do: it prints `git filter-repo`, it does not run it."
 
-**Screen:** stay on the `> WARNING:` line for a full second.
+**Screen:** stay on the `> WARNING:` line for a full second. It is the last
+output of the take, so it is already at the bottom of the frame — just stop
+moving.
+
+Take 3 is the one take the wrapper does *not* trigger, because `git add .`
+succeeds. You type `gitwhy` here. That contrast is worth a clause: it answers a
+failed command on its own, and it answers a healthy repository when asked.
 
 ---
 
