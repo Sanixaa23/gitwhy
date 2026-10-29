@@ -18,15 +18,16 @@ was written by hand.
 
 ### Demo video — 3 minutes
 
-[![The first failed push: git's error, then gitwhy's answer with nothing typed](docs/demo-video.gif)](https://github.com/Sanixaa23/gitwhy/blob/main/docs/gitwhy-demo.mp4)
+[![The first failed push: git's error, then gitwhy's answer with nothing typed](docs/demo-video.gif)](https://github.com/Sanixaa23/gitwhy/releases/download/v0.1.0/gitwhy-demo.mp4)
 
-### ▶ [Watch the full 3 minutes, with narration](https://github.com/Sanixaa23/gitwhy/blob/main/docs/gitwhy-demo.mp4)
+### ▶ [Download the full 3 minutes, with narration](https://github.com/Sanixaa23/gitwhy/releases/download/v0.1.0/gitwhy-demo.mp4)
 
 The moving image above is a **silent 12-second preview** — it is a GIF, and a GIF
-cannot carry audio. The full video is narrated; click the link above and GitHub plays
-it with sound. It is also [attached to the v0.1.0
-release](https://github.com/Sanixaa23/gitwhy/releases/tag/v0.1.0) if you would rather
-download it.
+cannot carry audio. The full video is narrated, but **GitHub will not play it in the
+browser**: it refuses to preview a blob this size, and it serves the raw file as
+`application/octet-stream` with `nosniff`. The link above is the asset [attached to
+the v0.1.0 release](https://github.com/Sanixaa23/gitwhy/releases/tag/v0.1.0), so it
+downloads; open it in any player and the narration is there.
 
 That preview is the opening beat: `git push` fails, git's error sits there, and the
 explanation appears underneath with nothing else typed.
