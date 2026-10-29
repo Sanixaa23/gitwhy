@@ -10,7 +10,7 @@ push reached the remote and was turned away by a rule.
 ## Where you are
 
 - Repository: `{{repo}}`
-- Branch: `{{branch}}` → `{{upstream}}`
+- Branch: `{{branch}}` -> `{{upstream}}`
 - Waiting to be sent: {{ahead}} commit(s)
 - Last commit: {{last_subject}}
 

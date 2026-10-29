@@ -7,7 +7,7 @@ pushed to the same branch before you did.
 ## Where you are
 
 - Repository: `{{repo}}`
-- Branch: `{{branch}}` → `{{upstream}}`
+- Branch: `{{branch}}` -> `{{upstream}}`
 - Waiting to be sent: {{ahead}} commit(s)
 - Behind: {{behind}} commit(s)
 

@@ -207,7 +207,33 @@ def cmd_shell_init(arg) -> int:
     return 0
 
 
+def _make_output_printable() -> None:
+    """Stop a Windows console codepage from killing the explanation.
+
+    Python encodes stdout with the locale codepage, which on Windows is
+    cp1252 in most of the English-speaking world and cp1254 here. Neither
+    has U+2192. A template containing one raised UnicodeEncodeError and
+    gitwhy died instead of answering -- on 07_push_rejected, which is the
+    most common git failure there is.
+
+    Two things are wrong with that and this fixes both. UTF-8 first, so a
+    modern terminal shows the character properly. Then errors="replace", so
+    on a console that genuinely cannot render it the worst case is a "?" in
+    the middle of a sentence rather than a traceback. An explanation with
+    one wrong glyph is still an explanation.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError, OSError):
+            # Python < 3.7, or a stream that is not a TextIOWrapper (a pipe
+            # a test replaced, say). Nothing to do, and nothing worth
+            # failing over: this is output polish, not correctness.
+            pass
+
+
 def main(argv=None) -> int:
+    _make_output_printable()
     parser = argparse.ArgumentParser(
         prog="gitwhy",
         description="Explains git errors by reading your repository's state.",
