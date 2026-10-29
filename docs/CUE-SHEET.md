@@ -1,5 +1,22 @@
 # Cue sheet — read this while recording
 
+> **There is already a rendered picture track:** `docs/gitwhy-demo.mp4`, 2:26,
+> 1920x1080. Every character in it came out of `tools/video_capture.sh` running
+> the real commands against the real repositories — it is drawn, not faked, and
+> not screen-captured. If you use it, you only have to read the narration below
+> over the top; you do not have to run any of the takes yourself.
+>
+> Rebuild it after any change to the output with:
+>
+> ```bash
+> bash tools/video_capture.sh && python tools/video_render.py
+> ```
+>
+> Record your voice against it in Audacity or your phone, then lay the two
+> together. The rest of this file is the narration and the timings it was
+> rendered to, and it is still the instructions if you would rather record the
+> terminal yourself.
+
 `VIDEO.md` is the shot list and the reasoning. This is the operator's card:
 what to type, what you will see, what to say, in order, nothing else.
 

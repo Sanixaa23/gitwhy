@@ -14,3 +14,7 @@ htmlcov/
 .vscode/
 .DS_Store
 docs/_*.png
+
+# Captured take output: regenerate with tools/video_capture.sh.
+# Machine-specific paths appear in it (the repositories live under $HOME).
+docs/takes/
