@@ -1,21 +1,29 @@
 # Cue sheet — read this while recording
 
-> **There is already a rendered picture track:** `docs/gitwhy-demo.mp4`, 2:26,
-> 1920x1080. Every character in it came out of `tools/video_capture.sh` running
-> the real commands against the real repositories — it is drawn, not faked, and
-> not screen-captured. If you use it, you only have to read the narration below
-> over the top; you do not have to run any of the takes yourself.
+> **The video is finished: `docs/gitwhy-demo.mp4`, 3:01, 1920x1080, narrated.**
+> Every character on screen came out of `tools/video_capture.sh` running the
+> real commands against the real repositories — drawn, not faked, and not
+> screen-captured. The narration is ElevenLabs (voice "Jessica - Playful,
+> Bright, Warm", model `eleven_v4`), generated from the script below and kept
+> in `docs/narration/`.
 >
-> Rebuild it after any change to the output with:
+> **The narration decides the cut, not the other way round.** Each segment's
+> picture lasts exactly as long as its line plus a breath, so re-generating one
+> line re-times both sides by itself and nothing is ever nudged in an editor.
 >
 > ```bash
 > bash tools/video_capture.sh && python tools/video_render.py
 > ```
 >
-> Record your voice against it in Audacity or your phone, then lay the two
-> together. The rest of this file is the narration and the timings it was
-> rendered to, and it is still the instructions if you would rather record the
-> terminal yourself.
+> With `docs/narration/` empty that same command still renders the picture on
+> the hand-written timings below, silent, for recording over yourself.
+>
+> **Check whether the event requires AI-generated content to be disclosed.** A
+> synthetic narrator is usually fine, but the video is the most visible place
+> for a rule like that to be broken.
+>
+> The rest of this file is the narration as generated, and the instructions if
+> you would rather record the terminal and your own voice instead.
 
 `VIDEO.md` is the shot list and the reasoning. This is the operator's card:
 what to type, what you will see, what to say, in order, nothing else.

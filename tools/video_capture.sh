@@ -48,7 +48,11 @@ cd "$ROOT"
 python tests/test_rules.py > "$OUT/05_matrix.txt" 2>&1
 
 echo "take 6: the safety tests"
-python -m pytest tests/test_safety.py tests/test_ai.py -q > "$OUT/06_safety.txt" 2>&1
+# Verbose, not -q. The narration over this segment is about what the safety
+# rules actually are, and with -v the test names say them: a destructive
+# template carries a warning, the collector modifies nothing, the AI mode
+# cannot add a command. Two lines of dots say none of that.
+python -m pytest tests/test_safety.py tests/test_ai.py -v --no-header 2>&1   | grep -E "PASSED|passed"   | sed 's/tests\///; s/ PASSED.*/  PASSED/' > "$OUT/06_safety.txt"
 
 # Take 7's install line, run for real against the public repository rather
 # than typed into a transcript. It also demonstrates the dependency claim:

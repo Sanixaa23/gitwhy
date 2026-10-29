@@ -41,7 +41,16 @@ except ImportError:
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TAKES = os.path.join(ROOT, "docs", "takes")
+NARRATION = os.path.join(ROOT, "docs", "narration")
 OUT = os.path.join(ROOT, "docs", "gitwhy-demo.mp4")
+SILENT = os.path.join(ROOT, "docs", "gitwhy-demo-silent.mp4")
+
+# The narration decides the cut, not the other way round. Each segment's
+# picture lasts exactly as long as its line plus PAD, so nothing has to be
+# nudged in an editor afterwards and a re-generated line re-times the video
+# by itself. CARD is the title and end card, which have no narration.
+PAD = 1.1
+CARD = 4.0
 
 WIDTH, HEIGHT = 1920, 1080
 FPS = 30
@@ -292,6 +301,38 @@ def read_take(name: str) -> List[str]:
         return f.read().replace("\r\n", "\n").rstrip("\n").split("\n")
 
 
+def ffmpeg() -> str:
+    return imageio_ffmpeg.get_ffmpeg_exe()
+
+
+def audio_seconds(path: str) -> float:
+    """Length of an mp3, read from ffmpeg's own report of it."""
+    import subprocess
+    out = subprocess.run([ffmpeg(), "-i", path], capture_output=True, text=True,
+                         encoding="utf-8", errors="replace").stderr
+    m = re.search(r"Duration: (\d+):(\d+):(\d+\.?\d*)", out)
+    if not m:
+        raise SystemExit("Could not read the length of %s" % path)
+    h, mnt, sec = m.groups()
+    return int(h) * 3600 + int(mnt) * 60 + float(sec)
+
+
+def narration(name: str) -> Optional[str]:
+    """The mp3 for a take, or None when the narration has not been made yet."""
+    path = os.path.join(NARRATION, name + ".mp3")
+    return path if os.path.exists(path) else None
+
+
+def take_seconds(clip: str, fallback: float) -> float:
+    """How long a take runs: its narration plus a breath, else the fallback.
+
+    The fallback is the hand-written timing from docs/CUE-SHEET.md, so the
+    video still renders sensibly with no narration present at all.
+    """
+    path = narration(clip)
+    return round(audio_seconds(path) + PAD, 2) if path else fallback
+
+
 def source_lines(relpath: str, first: int, last: int) -> List[str]:
     """A real slice of a real source file, for the architecture segment.
 
@@ -363,23 +404,33 @@ def render(take: Take, writer, size: int) -> int:
     return written
 
 
+CLIPS = ("01_first_push", "02_rebase", "03_secret", "04a_collector",
+         "04b_pure_function", "05_matrix", "06_safety", "07_close")
+
+
 def build_takes() -> List[Take]:
     """The seven segments, with the cue sheet's timings."""
     takes: List[Take] = []
 
     # 1 -- 0:00-0:20. The git error, a beat, then the answer with no typing.
     git_part, why_part = split_at_gitwhy(read_take("01_push.txt"))
-    t = Take("1 first push", 20.0)
+    t = Take("1 first push", take_seconds("01_first_push", 20.0))
     t.type("cd ~/gitwhy-video/01-first-push", 1.4)
     t.type("git push", 0.9)
     t.output(git_part, 0.5)
-    t.pause(1.6)                      # the beat the shot list asks for
+    # The beat the shot list asks for, timed against the narration rather
+    # than guessed. The line is "...what a remote is. [pause] We did not type
+    # anything", and silencedetect puts that pause 8.3s into the take. The
+    # steps above end at 2.8s, so gitwhy's answer has to wait 6.55s to land
+    # on the words that describe it appearing. This is the one moment the
+    # whole segment exists for; four seconds early and it lands on nothing.
+    t.pause(6.55)
     t.output(why_part, 0.9)
     takes.append(t)
 
     # 2 -- 0:20-0:42. Same shape: the wrapper answers a failed rebase.
     git_part, why_part = split_at_gitwhy(read_take("02_rebase.txt"))
-    t = Take("2 rebase conflict", 22.0)
+    t = Take("2 rebase conflict", take_seconds("02_rebase", 22.0))
     t.type("cd ~/gitwhy-video/02-rebase", 1.3)
     t.type("git rebase main", 1.1)
     t.output(git_part, 0.5)
@@ -388,7 +439,7 @@ def build_takes() -> List[Take]:
     takes.append(t)
 
     # 3 -- 0:42-1:00. `git add .` succeeds, so this one is asked, not offered.
-    t = Take("3 staged secret", 18.0)
+    t = Take("3 staged secret", take_seconds("03_secret", 18.0))
     t.type("cd ~/gitwhy-video/03-secret", 1.3)
     t.type("git add .", 0.8)
     t.blank(1)
@@ -399,24 +450,24 @@ def build_takes() -> List[Take]:
     # 4 -- 1:00-1:25. The architecture, shown as the two files that are the
     # argument: one call to git, then a pure function over its result. Code
     # rather than a diagram, because the claim is about the code.
-    t = Take("4a the collector", 13.0, code=True)
+    t = Take("4a the collector", take_seconds("04a_collector", 13.0), code=True)
     t.type("sed -n '93,118p' src/gitwhy/context.py", 1.6)
     t.output(source_lines("src/gitwhy/context.py", 93, 118), 1.0)
     takes.append(t)
 
-    t = Take("4b the pure function", 12.0, code=True)
+    t = Take("4b the pure function", take_seconds("04b_pure_function", 12.0), code=True)
     t.type("sed -n '174,190p' src/gitwhy/rules.py", 1.6)
     t.output(source_lines("src/gitwhy/rules.py", 174, 190), 1.0)
     takes.append(t)
 
     # 5 -- 1:25-1:50. The matrix. Big type: this is a punchline.
-    t = Take("5 accuracy matrix", 25.0)
+    t = Take("5 accuracy matrix", take_seconds("05_matrix", 25.0))
     t.type("python tests/test_rules.py", 1.5)
     t.output(read_take("05_matrix.txt"), 1.2)
     takes.append(t)
 
     # 6 -- 1:50-2:08. Two lines, so they get the largest type in the video.
-    t = Take("6 safety suite", 18.0)
+    t = Take("6 safety suite", take_seconds("06_safety", 18.0))
     t.type("python -m pytest tests/test_safety.py tests/test_ai.py -q", 2.4)
     t.output(read_take("06_safety.txt"), 1.0)
     takes.append(t)
@@ -427,7 +478,7 @@ def build_takes() -> List[Take]:
     # had invented pipx output, which is exactly the thing the shot list
     # forbids, in the project whose whole argument is that it does not
     # make things up.
-    t = Take("7 close", 12.0)
+    t = Take("7 close", take_seconds("07_close", 12.0))
     t.type("pip install git+https://github.com/Sanixaa23/gitwhy", 2.0)
     t.output(read_take("07_install.txt"), 0.8)
     t.blank(1)
@@ -463,6 +514,66 @@ def card(lines: Sequence[Tuple[str, Tuple[int, int, int], int]],
     return n
 
 
+def build_audio(takes: Sequence["Take"], clips: Sequence[Optional[str]],
+                out_wav: str) -> bool:
+    """Lay the narration on a timeline that matches the rendered picture.
+
+    One silent stretch for the title card, then each line followed by its
+    PAD of silence, then the end card. Because each take's picture was given
+    exactly that same length, the two line up without anything being nudged
+    by hand -- and re-generating one line re-times both sides at once.
+    """
+    import subprocess
+    import tempfile
+
+    if not any(clips):
+        return False
+
+    work = tempfile.mkdtemp(prefix="gitwhy-audio-")
+    parts: List[str] = []
+
+    def silence(seconds: float, name: str) -> str:
+        path = os.path.join(work, name)
+        subprocess.run([ffmpeg(), "-y", "-v", "error", "-f", "lavfi",
+                        "-i", "anullsrc=r=44100:cl=stereo",
+                        "-t", "%.3f" % seconds, path], check=True)
+        return path
+
+    parts.append(silence(CARD, "000_title.wav"))
+
+    for i, (take, clip) in enumerate(zip(takes, clips)):
+        if clip is None:
+            # No narration for this take: hold silence for its whole length.
+            parts.append(silence(take.seconds, "%03d_gap.wav" % (i + 1)))
+            continue
+        path = os.path.join(work, "%03d_line.wav" % (i + 1))
+        # apad appends the breath after the line, so the pad is part of the
+        # same file and the concat stays sample-accurate.
+        subprocess.run([ffmpeg(), "-y", "-v", "error", "-i", clip,
+                        "-af", "apad=pad_dur=%.3f" % PAD,
+                        "-ar", "44100", "-ac", "2", path], check=True)
+        parts.append(path)
+
+    parts.append(silence(CARD, "999_end.wav"))
+
+    listing = os.path.join(work, "concat.txt")
+    with open(listing, "w", encoding="utf-8") as f:
+        for part in parts:
+            f.write("file '%s'\n" % part.replace("\\", "/").replace("'", "'\\''"))
+
+    subprocess.run([ffmpeg(), "-y", "-v", "error", "-f", "concat", "-safe", "0",
+                    "-i", listing, "-c", "copy", out_wav], check=True)
+    return True
+
+
+def mux(video: str, wav: str, out: str) -> None:
+    """Join the rendered picture to the narration track."""
+    import subprocess
+    subprocess.run([ffmpeg(), "-y", "-v", "error", "-i", video, "-i", wav,
+                    "-c:v", "copy", "-c:a", "aac", "-b:a", "160k",
+                    "-shortest", out], check=True)
+
+
 def main(argv: Sequence[str] = ()) -> int:
     only = argv[0] if argv else None
     takes = build_takes()
@@ -476,8 +587,9 @@ def main(argv: Sequence[str] = ()) -> int:
           (len(takes), total, WIDTH, HEIGHT, FPS))
     print("font: %s" % FONT_PATH)
 
+    target = OUT if only else SILENT
     writer = imageio_ffmpeg.write_frames(
-        OUT, (WIDTH, HEIGHT), fps=FPS, codec="libx264", quality=7,
+        target, (WIDTH, HEIGHT), fps=FPS, codec="libx264", quality=7,
         macro_block_size=1, ffmpeg_log_level="error",
         output_params=["-pix_fmt", "yuv420p"])
     writer.send(None)
@@ -492,7 +604,7 @@ def main(argv: Sequence[str] = ()) -> int:
                 ("", FG, 20),
                 ("twelve scenarios  ·  18/18 on the accuracy matrix"
                  "  ·  no model in the decision", DIM, 26),
-            ], 4.0, writer)
+            ], CARD, writer)
 
         for take in takes:
             size = fit_size(take.rows())
@@ -509,14 +621,32 @@ def main(argv: Sequence[str] = ()) -> int:
                 ("", FG, 16),
                 ("MIT  ·  no dependencies  ·  works offline"
                  "  ·  no account", DIM, 28),
-            ], 4.0, writer)
+            ], CARD, writer)
     finally:
         writer.close()
 
-    print("\n%s" % OUT)
-    print("%d frames, %.1fs, %.1f MB" % (
-        frames, frames / FPS, os.path.getsize(OUT) / 1e6))
-    print("\nPicture only. Read docs/CUE-SHEET.md over it for the narration.")
+    if only:
+        print("\n%s  (single take, no audio)" % OUT)
+        return 0
+
+    clips = [narration(c) for c in CLIPS]
+    wav = os.path.join(os.path.dirname(SILENT), "gitwhy-demo-narration.wav")
+    if build_audio(takes, clips, wav):
+        mux(SILENT, wav, OUT)
+        os.remove(wav)
+        os.remove(SILENT)
+        print("\n%s" % OUT)
+        print("%d frames, %.1fs, %.1f MB, narrated" % (
+            frames, frames / FPS, os.path.getsize(OUT) / 1e6))
+        missing = [c for c, got in zip(CLIPS, clips) if not got]
+        if missing:
+            print("silent stretches (no narration yet): %s" % ", ".join(missing))
+    else:
+        os.replace(SILENT, OUT)
+        print("\n%s" % OUT)
+        print("%d frames, %.1fs, %.1f MB" % (
+            frames, frames / FPS, os.path.getsize(OUT) / 1e6))
+        print("\nNo narration in docs/narration/, so this is picture only.")
     return 0
 
 
